@@ -4,12 +4,18 @@ from constants import const
 import pickle
 import time
 import multiprocessing
+from collections.abc import Generator
+from pathlib import Path
+from typing import Literal
+
 # import pyvista as pv
 # from operator import itemgetter
 
 CONSTANTS = const()
 
-def has_neighboring_unused_voxel(x, y, z, data):
+def has_neighboring_unused_voxel(
+    x: int | np.integer, y: int | np.integer, z: int | np.integer, data: np.ndarray,
+) -> bool:
     if data[z - 1][x][y] == CONSTANTS.UNUSED_VOXEL:
         return True
     elif data[z + 1][x][y] == CONSTANTS.UNUSED_VOXEL:
@@ -24,7 +30,9 @@ def has_neighboring_unused_voxel(x, y, z, data):
         return True
     return False
 
-def get_all_inlet_outlet_fluid_voxels(walls, data):
+def get_all_inlet_outlet_fluid_voxels(
+    walls: zip, data: np.ndarray,
+) -> Generator[tuple[int | np.integer, int | np.integer, int | np.integer], None, None]:
     for z, x, y in walls: 
         if data[z - 1][x][y] == CONSTANTS.FLUID_VOXEL:
             if has_neighboring_unused_voxel(x, y, z - 1, data):
@@ -45,7 +53,9 @@ def get_all_inlet_outlet_fluid_voxels(walls, data):
             if has_neighboring_unused_voxel(x, y + 1, z, data):
                 yield (z, x, y + 1)
 
-def get_neighbouring_unused_voxel_plane(x, y, z, data):
+def get_neighbouring_unused_voxel_plane(
+    x: int | np.integer, y: int | np.integer, z: int | np.integer, data: np.ndarray,
+) -> Literal["x", "y", "z"] | None:
     if data[z - 1][x][y] == CONSTANTS.UNUSED_VOXEL or data[z + 1][x][y] == CONSTANTS.UNUSED_VOXEL:
         return "z"
     elif data[z][x - 1][y] == CONSTANTS.UNUSED_VOXEL or data[z][x + 1][y] == CONSTANTS.UNUSED_VOXEL:
@@ -53,7 +63,10 @@ def get_neighbouring_unused_voxel_plane(x, y, z, data):
     elif data[z][x][y - 1] == CONSTANTS.UNUSED_VOXEL or data[z][x][y + 1] == CONSTANTS.UNUSED_VOXEL:
         return "y"
 
-def find_inlet_outlet(x, y, z, data, plane):
+def find_inlet_outlet(
+    x: int | np.integer, y: int | np.integer, z: int | np.integer,
+    data: np.ndarray, plane: Literal["x", "y", "z"] | None,
+) -> list[tuple[int, int, int]] | None:
     """ Returns a list of voxels (x, y, z) that make up the inlet/outlet for a voxel """
     inlet_outlet = []
     inlet_outlet += recur_find_inlet_outlet(x, y, z, None, None, None, [], data, plane)
@@ -64,18 +77,28 @@ def find_inlet_outlet(x, y, z, data, plane):
 
     return None
 
-def show_progress(progress, total):
+def show_progress(progress: int, total: int) -> None:
     sys.stdout.flush()
     sys.stdout.write('\r[{0}] {1:.2f}%'.format('#' * int((progress * 10) / total), (progress * 100.) / total))
     sys.stdout.flush()
 
-def voxel_is_not_yet_processed(x, y, z, inlets_outlets):
+def voxel_is_not_yet_processed(
+    x: int | np.integer, y: int | np.integer, z: int | np.integer,
+    inlets_outlets: list[list[tuple[int, int, int]]],
+) -> bool:
     for l in inlets_outlets:
         if (x, y, z) in l:
             return False
     return True
 
-def recur_find_inlet_outlet(x, y, z, prev_x, prev_y, prev_z, result, data, plane):
+def recur_find_inlet_outlet(
+    x: int | np.integer, y: int | np.integer, z: int | np.integer,
+    prev_x: int | np.integer | None,
+    prev_y: int | np.integer | None,
+    prev_z: int | np.integer | None,
+    result: list[tuple[int, int, int]], data: np.ndarray,
+    plane: Literal["x", "y", "z"] | None,
+) -> list[tuple[int, int, int]]:
     """ Recursive function for finding the inlet/outlet for a voxel """
     result.append((x, y, z))
 
@@ -105,14 +128,18 @@ def recur_find_inlet_outlet(x, y, z, prev_x, prev_y, prev_z, result, data, plane
                         result = recur_find_inlet_outlet(x_n, y_n, z_n, x, y, z, result, data, plane)
     return result
 
-def find_openings(fluid_voxel, data):
+def find_openings(
+    fluid_voxel: tuple[int, int, int], data: np.ndarray,
+) -> list[tuple[int, int, int]] | None:
     z, x, y = fluid_voxel
     plane = get_neighbouring_unused_voxel_plane(x, y, z, data)
     inlet_outlet = find_inlet_outlet(x, y, z, data, plane)
     # if(inlet_outlet is not None):
     return inlet_outlet
 
-def detect_inlets_outlets(data):
+def detect_inlets_outlets(
+    data: np.ndarray,
+) -> tuple[list[int], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray]:
     """ Detects all inlets and outlets of the vessel model. Assumes the following:
         - The vessel has only one inlet.
         - All outlets are smaller in diameter than the inlets.
@@ -191,7 +218,9 @@ def detect_inlets_outlets(data):
 
     return paint_inlets_outlets(inlets_outlets, data)
 
-def paint_inlets_outlets(inlets_outlets, data):
+def paint_inlets_outlets(
+    inlets_outlets: list[list[tuple[int, int, int]]], data: np.ndarray,
+) -> tuple[list[int], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray]:
     """ Determines the inlet by picking the inlet/outlet with the greatest area
         Then paints the inlet with the value 6 and the outlets with 7
     """
@@ -253,7 +282,9 @@ def paint_inlets_outlets(inlets_outlets, data):
     return (openingIdx, openingCenter, inlets_outlets, data_result)
 
 
-def detectOpenings(inputArray, wall_path):
+def detectOpenings(
+    inputArray: np.ndarray, wall_path: str | Path,
+) -> tuple[list[int], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray]:
     sys.setrecursionlimit(10000000)
     
     global wall_nrrd_path

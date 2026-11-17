@@ -1,144 +1,190 @@
-import math
-import itertools
+from collections.abc import Generator
 
-import numpy as np
+from geometry_types import Line, Triangle, Vector
 
-import perimeter
-from util import manhattanDistance, removeDupsFromPointList
 
-def toIntersectingLines(mesh, height):
-    relevantTriangles = list(filter(lambda tri: isAboveAndBelow(tri, height), mesh))
-    notSameTriangles = filter(lambda tri: not isIntersectingTriangle(tri, height), relevantTriangles)
-    lines = list(map(lambda tri: triangleToIntersectingLines(tri, height), notSameTriangles))
-    return lines
+def to_intersecting_lines(
+    mesh: list[Triangle],
+    height: float,
+) -> list[tuple[tuple[float, float, float], tuple[float, float, float]]]:
+    relevant_triangles = list(filter(lambda tri: is_above_and_below(tri, height), mesh))
+    not_tame_triangles = filter(
+        lambda tri: not is_intersecting_triangle(tri, height),
+        relevant_triangles,
+    )
+    return [triangle_to_intersecting_lines(tri, height) for tri in not_tame_triangles]
 
-def drawLineOnPixels(p1, p2, pixels):
-    lineSteps = math.ceil(manhattanDistance(p1, p2))
-    if lineSteps == 0:
-        pixels[int(p1[0]), int(p2[1])] = True
-        return
-    for j in range(lineSteps + 1):
-        point = linearInterpolation(p1, p2, j / lineSteps)
-        pixels[int(point[0]), int(point[1])] = True
 
-def linearInterpolation(p1, p2, distance):
-    '''
+def linear_interpolation(
+    p1: Vector,
+    p2: Vector,
+    distance: float,
+) -> Vector:
+    """
     :param p1: Point 1
     :param p2: Point 2
     :param distance: Between 0 and 1, Lower numbers return points closer to p1.
     :return: A point on the line between p1 and p2
-    '''
-    slopex = (p1[0] - p2[0])
-    slopey = (p1[1] - p2[1])
+
+    """
+    slopex = p1[0] - p2[0]
+    slopey = p1[1] - p2[1]
     slopez = p1[2] - p2[2]
     return (
         p1[0] - distance * slopex,
         p1[1] - distance * slopey,
-        p1[2] - distance * slopez
+        p1[2] - distance * slopez,
     )
 
 
-def isAboveAndBelow(pointList, height):
-    '''
-
-    :param pointList: Can be line or triangle
+def is_above_and_below(
+    point_list: list[Vector],
+    height: float,
+) -> bool:
+    """:param pointList: Can be line or triangle
     :param height:
     :return: true if any line from the triangle crosses or is on the height line,
-    '''
-    above = list(filter(lambda pt: pt[2] > height, pointList))
-    below = list(filter(lambda pt: pt[2] < height, pointList))
-    same = list(filter(lambda pt: pt[2] == height, pointList))
-    if len(same) == 3 or len(same) == 2:
-        return True
-    elif (above and below):
-        return True
-    else:
-        return False
+    """
+    above = list(filter(lambda pt: pt[2] > height, point_list))
+    below = list(filter(lambda pt: pt[2] < height, point_list))
+    same = list(filter(lambda pt: pt[2] == height, point_list))
+    return bool(len(same) == 3 or len(same) == 2 or (above and below))
 
-def isIntersectingTriangle(triangle, height):
-    assert (len(triangle) == 3)
+
+def is_intersecting_triangle(
+    triangle: Triangle,
+    height: float,
+) -> bool:
+    assert len(triangle) == 3
     same = list(filter(lambda pt: pt[2] == height, triangle))
     return len(same) == 3
 
 
-def triangleToIntersectingLines(triangle, height):
-    assert (len(triangle) == 3)
+def triangle_to_intersecting_lines(
+    triangle: Triangle,
+    height: float,
+) -> Line:
+    assert len(triangle) == 3
+
     above = list(filter(lambda pt: pt[2] > height, triangle))
     below = list(filter(lambda pt: pt[2] < height, triangle))
     same = list(filter(lambda pt: pt[2] == height, triangle))
+
     assert len(same) != 3
+
     if len(same) == 2:
         return same[0], same[1]
-    elif len(same) == 1:
-        side1 = whereLineCrossesZ(above[0], below[0], height)
+    if len(same) == 1:
+        side1 = where_line_crosses_z(above[0], below[0], height)
         return side1, same[0]
-    else:
-        lines = []
-        for a in above:
-            for b in below:
-                lines.append((b, a))
-        side1 = whereLineCrossesZ(lines[0][0], lines[0][1], height)
-        side2 = whereLineCrossesZ(lines[1][0], lines[1][1], height)
-        return side1, side2
+    lines = []
+    for a in above:
+        for b in below:
+            lines.append((b, a))
+    # Project triangle to line on plane with z=height
+    side1 = where_line_crosses_z(lines[0][0], lines[0][1], height)
+    side2 = where_line_crosses_z(lines[1][0], lines[1][1], height)
+    return side1, side2
 
 
-def whereLineCrossesZ(p1, p2, z):
-    if (p1[2] > p2[2]):
+def where_line_crosses_z(
+    p1: Vector,
+    p2: Vector,
+    z: float,
+) -> Vector:
+    if p1[2] > p2[2]:
         t = p1
         p1 = p2
         p2 = t
     # now p1 is below p2 in z
-    if p2[2] == p1[2]:
-        distance = 0
-    else:
-        distance = (z - p1[2]) / (p2[2] - p1[2])
-    return linearInterpolation(p1, p2, distance)
+    distance = 0 if p2[2] == p1[2] else (z - p1[2]) / (p2[2] - p1[2])
+    return linear_interpolation(p1, p2, distance)
 
 
-def calculateScaleAndShift(mesh, targetElements):
-    allPoints = [item for sublist in mesh for item in sublist]
+def calculate_scale_and_shift(
+    mesh: list[Triangle],
+    target_elements: int,
+) -> tuple[list[float], list[float], list[int], list[list[float]]]:
+    """Compute the mesh-to-voxel transform and unpadded domain dimensions.
+
+    Parameters
+    ----------
+    mesh : list of triangles
+        Triangle vertices in geometry coordinates. Must be nonempty and have
+        a bounding box with positive extent along every axis.
+    target_elements : int
+        Positive target voxel count for the bounding box, not the vessel interior.
+        Integer truncation makes the resulting count approximate.
+
+    Returns
+    -------
+    scale : list of float
+        Uniform scale factors, derived from the truncated x-domain size.
+    shift : list of float
+        Negated bounding-box minima. Transform points as
+        ``voxel_point = (point + shift) * scale`` componentwise.
+    domain : list of int
+        Unpadded voxel counts in x, y, z order, obtained by truncating the
+        bounding-box extents multiplied by the initial target-based scale.
+    bounding_box : list of lists of float
+        Minimum and maximum coordinates, ``[mins, maxs]``, in geometry units.
+
+    """
+    all_points = [item for sublist in mesh for item in sublist]
     mins = [0, 0, 0]
     maxs = [0, 0, 0]
     ds = [0, 0, 0]
     for i in range(3):
-        mins[i] = min(allPoints, key=lambda tri: tri[i])[i]
-        maxs[i] = max(allPoints, key=lambda tri: tri[i])[i]
+        mins[i] = min(all_points, key=lambda tri: tri[i])[i]
+        maxs[i] = max(all_points, key=lambda tri: tri[i])[i]
         ds[i] = maxs[i] - mins[i]
-    
+
     bounding_box = [mins, maxs]
-    ds3 = ds[0]*ds[1]*ds[2]
-    vox_scale = (targetElements / ds3 ) ** (1. / 3)
-    
-    #domain = map(int, [vox_scale * ds[0], vox_scale * ds[1], vox_scale * ds[2]]) 
-    domain = [int(x) for x in [vox_scale * ds[0], vox_scale * ds[1], vox_scale * ds[2]]] 
+    volume = ds[0] * ds[1] * ds[2]
+    # Compute size of each voxel
+    vox_scale = (target_elements / volume) ** (1.0 / 3)
+
+    # The amount of voxels in each dimension.
+    domain = [int(x) for x in [vox_scale * ds[0], vox_scale * ds[1], vox_scale * ds[2]]]
+
+    # Shift to get most minimum of bounding box to origin.
     shift = [-minimum for minimum in mins]
-    
-    #xyscale = (domain[0] - 1.0) / ds[0]
+
+    # Actual scale to exactly cover the x range with the voxels in domain.
     xyscale = domain[0] / ds[0]
-    scale = [xyscale, xyscale, xyscale] #TODO Something is fishy here, what is this xyscale???
+    scale = [
+        xyscale,
+        xyscale,
+        xyscale,
+    ]
 
     return (scale, shift, domain, bounding_box)
 
 
-def scaleAndShiftMesh(mesh, scale, shift):
+def scale_and_shift_mesh(
+    mesh: list[Triangle],
+    scale: list[float],
+    shift: list[float],
+) -> Generator[Triangle]:
     for tri in mesh:
-        newTri = []
+        new_tri = []
         for pt in tri:
             newpt = [0, 0, 0]
             for i in range(3):
                 newpt[i] = (pt[i] + shift[i]) * scale[i]
-            newTri.append(tuple(newpt))
-        if len(removeDupsFromPointList(newTri)) == 3:
-            yield newTri
-        else:
-            pass
+            shifted_point: Vector = tuple(new_tri)  # ty: ignore[invalid-assignment]
+            new_tri.append(shifted_point)
+        yield new_tri  # ty: ignore[invalid-yield]
 
 
-def swapAxisWithZ(mesh, axis):
+def swap_axis_with_z(
+    mesh: list[Triangle],
+    axis: int,
+) -> Generator[Triangle]:
     # axis = 0 -> swap x - z
     # axis = 1 -> swap y - z
     for tri in mesh:
-        newTri = []
+        new_tri = []
         for pt in tri:
             newpt = [0, 0, 0]
             if axis == 0:
@@ -151,21 +197,20 @@ def swapAxisWithZ(mesh, axis):
                 newpt[2] = pt[1]
             else:
                 newpt = pt
-            newTri.append(tuple(newpt))
-        if len(removeDupsFromPointList(newTri)) == 3:
-            yield newTri
-        else:
-            pass
+            new_tri.append(tuple(newpt))
+        yield tuple(new_tri)  # ty: ignore[invalid-yield]
 
-def swapAxis(mesh, axis1, axis2):
+
+def swap_axis(
+    mesh: list[Triangle],
+    axis1: int,
+    axis2: int,
+) -> Generator[Triangle]:
     for tri in mesh:
-        newTri = []
+        new_tri = []
         for pt in tri:
             newpt = [pt[0], pt[1], pt[2]]
             newpt[axis1] = pt[axis2]
             newpt[axis2] = pt[axis1]
-            newTri.append(tuple(newpt))
-        if len(removeDupsFromPointList(newTri)) == 3:
-            yield newTri
-        else:
-            pass
+            new_tri.append(tuple(newpt))
+        yield tuple(new_tri)  # ty: ignore[invalid-yield]

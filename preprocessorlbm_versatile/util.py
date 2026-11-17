@@ -1,45 +1,55 @@
-from __future__ import print_function
+from geometry_types import Vector
 import numpy as np
 
-def manhattanDistance(p1, p2, d=2):
-    assert (len(p1) == len(p2))
-    allDistances = 0
+
+def manhattan_distance(
+    p1: tuple[float, float, float],
+    p2: tuple[float, float, float],
+    d: int = 2,
+) -> float:
+    assert len(p1) == len(p2)
+    all_distances = 0
     for i in range(d):
-        allDistances += abs(p1[i] - p2[i])
-    return allDistances
+        all_distances += abs(p1[i] - p2[i])
+    return all_distances
 
 
-def printBigArray(big, yes='1', no='0'):
-    print()
-    for line in big:
-        for char in line:
-            if char:
-                print(yes, end=" ")
-            else:
-                print(no, end=" ")
-        print()
+def remove_dups_from_point_list(
+    pt_list: list[Vector],
+) -> tuple[Vector, ...]:
+    new_list = pt_list[:]
+    return tuple(set(new_list))
 
 
-def removeDupsFromPointList(ptList):
-    newList = ptList[:]
-    return tuple(set(newList))
-
-def arrayToWhiteGreyscalePixel(array, pixels):
+def array_to_white_greyscale_pixel(
+    array: np.ndarray, pixels: np.ndarray,
+) -> None:
+    """Create a black and white (0/255) representation of array in pixels."""
     for i in range(array.shape[0]):
         for j in range(array.shape[1]):
             if array[i, j]:
                 pixels[i, j] = 255
+            else:
+                pixels[i, j] = 0
 
-def padVoxelArray(voxels):
+
+def pad_voxel_array(voxels: np.ndarray) -> np.ndarray:
+    """Add a padding layer around each edge of the domain.
+
+    Parameters
+    ----------
+    voxels: np.ndarray
+        A 3-Dimensional numpy array.
+
+    Returns
+    -------
+    A copy of voxels of size (x_shape + 2, y_shape + 2, z_shape + 2)
+
+    """
     shape = voxels.shape
-    new_shape = (shape[0]+2,shape[1]+2,shape[2]+2)
-    vol = np.zeros(new_shape, dtype='int8')
-    
-    vol[1:-1,1:-1,1:-1] = voxels
-    
-    # for a in range(shape[0]):
-    #     for b in range(shape[1]):
-    #         for c in range(shape[2]):
-    #             vol[a+1,b+1,c+1] = voxels[a,b,c]
-                
-    return vol, (new_shape[1],new_shape[2],new_shape[0])
+    new_shape = (shape[0] + 2, shape[1] + 2, shape[2] + 2)
+    vol = np.zeros(new_shape, dtype=np.int8)
+
+    vol[1:-1, 1:-1, 1:-1] = voxels
+
+    return vol

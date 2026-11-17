@@ -24,7 +24,9 @@ import numpy as np
 import multiprocessing
 import time
 
-def roll_zeropad(a, shift, axis=None):
+def roll_zeropad(
+    a: np.ndarray, shift: int, axis: int | None = None,
+) -> np.ndarray:
     """
     Roll array elements along a given axis.
 
@@ -76,7 +78,9 @@ def roll_zeropad(a, shift, axis=None):
     else:
         return res
     
-def removeUnusedOuterLayers(data):
+def removeUnusedOuterLayers(
+    data: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
 
     print("Removing unused outer layers...")
 
@@ -110,7 +114,11 @@ def removeUnusedOuterLayers(data):
 
     return data, sliced
 
-def createWalls(inputArray, cutList, cutWidxth = 1):
+def createWalls(
+    inputArray: np.ndarray,
+    cutList: list[int] | np.ndarray,
+    cutWidxth: int = 1,
+) -> tuple[np.ndarray, np.ndarray]:
     
     data1 = inputArray
     # Add extra layer of 0 (widxth 1) to allow for fluidx next to the domain boundary.

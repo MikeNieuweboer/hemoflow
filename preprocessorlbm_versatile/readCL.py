@@ -1,38 +1,40 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Aug  5 13:50:33 2020
+"""Created on Wed Aug  5 13:50:33 2020.
 
 @author: gzavo
 """
 
-# import sys
+from pathlib import Path
+
 import numpy as np
 import vtk
 
-# vesselGeomFile = "../working_data/Process/NAP287_vessel3.stl"
-# targetElem = 10000000
-# voxelVol, domainData = voxelize(vesselGeomFile, targetElem)
 
-# clFileName = "../working_data/Process/NAP287_centerline.vtp"
+def get_id_list(vtk_id_list: vtk.vtkIdList) -> list[int]:
+    """Retrieve a list of all ids in the vtkIdList."""
+    return [vtk_id_list.GetId(i) for i in range(vtk_id_list.GetNumberOfIds())]
 
-def getIdList(vtkIdList):
-    l = []
-    for i in range(vtkIdList.GetNumberOfIds()):
-        l.append(vtkIdList.GetId(i))
 
-    return l
+def normalize(v: np.ndarray) -> np.ndarray:
+    """Normalize a 3D array.
 
-def normalize(v):
+    Returns
+    -------
+    The normalized array, or a zero array if the magnitude is 0.
+
+    """
     norm = np.linalg.norm(v)
-    if norm == 0: 
-       return v
+    if norm == 0:
+        return v
     return v / norm
 
-def getOpeningsFromCenterline(fileName):
+
+def get_openings_from_center_line(
+    file_path: Path,
+) -> list[tuple[float, np.ndarray, np.ndarray]]:
     """
     Parameters
     ----------
-    fileName : String
+    file_name: Path
         Name of the centerline file (VTP).
 
     Returns
@@ -40,73 +42,66 @@ def getOpeningsFromCenterline(fileName):
     We'll see. But we assume all centerline runs from source (inlet) to target.
 
     """
-    
     reader = vtk.vtkXMLPolyDataReader()
-    reader.SetFileName(fileName)
+    reader.SetFileName(file_path.name)
     reader.Update()
 
-    data = reader.GetOutput()
+    data: vtk.vtkPolyData = reader.GetOutput()
     points = data.GetPoints()
-    pdata = data.GetPointData()
-    rdata = pdata.GetArray("MaximumInscribedSphereRadius") 
+    point_data = data.GetPointData()
+    radius_data = point_data.GetArray("MaximumInscribedSphereRadius")
 
     # Read the number of lines in the dataset
-    nLines = data.GetNumberOfLines()
-    
-    rTanData = []
-    
+    n_lines = data.GetNumberOfLines()
+
+    r_tan_data = []
+
+    # TODO:
     # inlet line ids. Note, only is correct with the current centerline file !!!!!!!!
     # How did I know? Hardcoded...... dumb but useful, need to find a portable way
     # VMTK has some problems with multiple inlets geometry, therefore need to hardcode
-    inlet_line_ids = [4, 5, 6, 7] # and unlabelled inlet
-    for ll in range(nLines):
+    inlet_line_ids = [4, 5, 6, 7]  # and unlabelled inlet
+    for ll in range(n_lines):
         line = data.GetCell(ll)
-        # numPoints = line.GetNumberOfPoints()
-        
+
         # Get the IDs of the datapoints on the selected line
-        idList = getIdList(line.GetPointIds())
-        
+        id_list = get_id_list(line.GetPointIds())
+
         # Get radii on the selected line
-        rArray = []
-        for i in idList:
-            rArray.append(rdata.GetTuple(i)[0])
+        r_array = np.array([radius_data.GetTuple(i)[0] for i in id_list])
 
-        rArray = np.array(rArray)
-        
         # Get points on the selected line
-        pArray = []
-        for i in idList:
-            pArray.append(np.array(points.GetPoint(i)))
-        
-        r1 = rArray[0]
-        r2 = rArray[-1]
-        
-        if ll == 0: # The first inlet!
-            v1 = pArray[0]-pArray[1]
-            rTanData.append((r1, pArray[0], -v1))  # The inlet should point inwards
-        
-        v2 = pArray[-1]-pArray[-3] # Note, the last 2 points are sometimes the same for some reason
+        p_array = [np.array(points.GetPoint(i)) for i in id_list]
+
+        r1 = r_array[0]
+        r2 = r_array[-1]
+
+        if ll == 0:  # The first inlet!
+            v1 = p_array[0] - p_array[1]
+            r_tan_data.append((r1, p_array[0], -v1))  # The inlet should point inwards
+
+        # Note, the last 2 points are sometimes the same for some reason
+        v2 = p_array[-1] - p_array[-3]
+
         # Inlet! point inwards!
-        if ll in(inlet_line_ids):
-            rTanData.append((r2, pArray[-1], -v2)) 
+        if ll in (inlet_line_ids):
+            r_tan_data.append((r2, p_array[-1], -v2))
         # All other tangents are pointing outwards
-        else: 
-            rTanData.append((r2, pArray[-1], v2))
-    
-        # print("Line: ", ll)
-        # print(r1, pArray[0], v1)
-        # print(r2, pArray[-1], v2)
-        
-    return rTanData
+        else:
+            r_tan_data.append((r2, p_array[-1], v2))
+
+    return r_tan_data
 
 
-def convertToVoxelspace(r_tan_data, scale, shift):
-    
-    voxelList = []
+def convert_to_voxelspace(
+    r_tan_data: list[tuple[float, np.ndarray, np.ndarray]],
+    scale: list[float],
+    shift: list[float],
+) -> list[tuple[float, np.ndarray, np.ndarray]]:
+    voxel_list = []
     for opening in r_tan_data:
         r, pos, tan = opening
         newpos = (pos + shift) * scale
-        voxelList.append((r, newpos, normalize(tan)))
-    
-    return voxelList
-        
+        voxel_list.append((r, newpos, normalize(tan)))
+
+    return voxel_list

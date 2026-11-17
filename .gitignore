@@ -43,6 +43,9 @@ build/
 # Python related
 __pycache__/
 
+# Input geometries and data
+patients/
+
 # Output files
 output/
 

@@ -14,6 +14,8 @@ Run from the repository root: `python preprocessorlbm_versatile/main.py /path/to
 
 Dependencies: NumPy, numpy-stl, VTK, h5py; pynrrd for debug output. The commented connected-component alternative would additionally use SciPy, but is not active.
 
+Function signatures use concrete lists/tuples for geometry and opening data, explicit `Generator` return types for functions using `yield`, and plain `np.ndarray` for NumPy arrays (no shape or dtype constraints).
+
 ## Files
 
 | File | Responsibility |

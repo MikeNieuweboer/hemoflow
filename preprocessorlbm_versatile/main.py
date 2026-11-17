@@ -1,213 +1,283 @@
+import argparse
+import json
+import logging
 import sys
 import time
+from pathlib import Path
+
+import h5py
 import numpy as np
-import json
-import os
-from readCL import getOpeningsFromCenterline, convertToVoxelspace
-from voxelizeStl import voxelize
+
 from createFluidSolid import createWalls
 from detectOpenings import detectOpenings
-import h5py
+from readCL import convert_to_voxelspace, get_openings_from_center_line
+from voxelizeStl import voxelize
+
+logger = logging.getLogger(__name__)
 
 
-#############################
-# Parameters to check before execution:
-SI_FACTOR = 0.001 # Ratio to [m]. Most STL is in [mm]
+def in_range(value: float, range_value: float, distance: int) -> np.bool_:
+    return np.abs(range_value - value) < distance
 
-DEBUG_MODE = False # This will enable additional intermediate nrrd output to check with e.g. 3DSlicer
-#############################
 
-if DEBUG_MODE:
-    import nrrd
-
-def inRange(value, rangeValue, distance):
-    if np.abs(rangeValue-value) < distance:
-        return True
-    return False
-
-def inRange3D(value3D, rangeValue3D, distance):
-    isInRange = True
+def in_range_3d(
+    value_3d: np.ndarray,
+    range_value_3d: tuple[float, float, float],
+    distance: int,
+) -> bool | np.bool_:
+    is_in_range = True
     for i in range(3):
-        isInRange = (isInRange and inRange(value3D[i], rangeValue3D[i], distance) )
-    
-    return isInRange
+        is_in_range = is_in_range and in_range(value_3d[i], range_value_3d[i], distance)
 
-def generateCutList(voxelDomainSize, radiusTangentVoxelList):
-    sidesToCut = np.zeros(6)
-    
+    return is_in_range
+
+
+def generate_cut_list(
+    voxelDomainSize: list[int] | tuple[int, int, int],
+    radius_tangent_voxel_list: list[tuple[float, np.ndarray, np.ndarray]],
+    distance: int = 4,
+) -> np.ndarray:
+    sides_to_cut = np.zeros(6)
+
     # If centerline point is within this distance of the boundary it is considered an opening
-    distance = 4  # 4 voxel distance: note, cutting away unused layers might influence this!
+    # Cutting away unused layers might influence this distance.
 
-    if DEBUG_MODE:
-            print("-> (DEBUG) generatin cutlist -> voxelDomainSize:", voxelDomainSize) 
-    
-    for o in radiusTangentVoxelList:
+    logger.debug("Generating cutlist -> voxelDomainSize: %s", voxelDomainSize)
+
+    for o in radius_tangent_voxel_list:
         pos = o[1]
 
-        if DEBUG_MODE:
-            print("-> (DEBUG) generatin cutlist -> centerline point:", pos)    
+        logger.debug("Generating cutlist -> centerline point: %s", pos)
 
         for j in range(3):
-            if inRange(pos[j], 0, distance):
-                sidesToCut[j*2]=1
-            if inRange(pos[j], voxelDomainSize[j], distance):
-                sidesToCut[j*2+1]=1
-            
-    return np.where(sidesToCut == 1)[0]
+            if in_range(pos[j], 0, distance):
+                sides_to_cut[j * 2] = 1
+            if in_range(pos[j], voxelDomainSize[j], distance):
+                sides_to_cut[j * 2 + 1] = 1
+
+    return np.where(sides_to_cut == 1)[0]
+
+class Arguments(argparse.Namespace):
+    """Class definition of input arguments."""
+
+    config: Path
+    debug: bool
+    si_factor: float
+    cut_width: int
+    distance: int
+
+def parse_arguments() -> Arguments:
+    """Parse arguments required for preprocessing."""
+    parser = argparse.ArgumentParser(
+        description="Voxelize vessel geometry using a JSON configuration.",
+    )
+    parser.add_argument("config", type=Path, help="Path to the input JSON config file")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable DEBUG logging and intermediate NRRD output",
+    )
+    parser.add_argument(
+        "--si-factor",
+        type=float,
+        default=0.001,
+        help="Geometry unit conversion factor to meters (default: 0.001, millimeters)",
+    )
+    parser.add_argument(
+        "--cut-width",
+        type=int,
+        default=1,
+        help="Number of voxel layers to cut at openings (default: 1)",
+    )
+    parser.add_argument(
+        "--distance",
+        type=int,
+        default=4,
+        help="Voxel tolerance for boundary cuts and opening matching (default: 4)",
+    )
+    return parser.parse_args(namespace=Arguments())
+
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage:", sys.argv[0], "input.config")
-        sys.exit(-1) 
+    args = parse_arguments()
+    DEBUG_MODE = args.debug
+    SI_FACTOR = args.si_factor
 
-    cutWidth = 1 # Might need to set this to 2 if there is more than 1 padding layer for some reason
-    distance = 4
+    logging.basicConfig(
+        level=logging.DEBUG if DEBUG_MODE else logging.INFO,
+        format="%(levelname)s: %(message)s",
+    )
+    if DEBUG_MODE:
+        import nrrd
 
-    confFile = sys.argv[1]
-    saveDir = os.path.dirname(confFile)
+    cut_width = args.cut_width
+    distance = args.distance
 
-    with open(confFile) as json_file:
-        confData = json.load(json_file)
-        
-    workDir = confData["geometry_dir"]
+    conf_file: Path = args.config
+    save_dir = conf_file.parent
 
-    # Cutlist meaning -> cut one layer from the planes:
-    # 0,1 => Xmin, Xmax
-    # 2,3 => Ymin, Ymax
-    # 4,5 => Zmin, Zmax
-    # cutList =  [int(x) for x in confData["cut_list"].split()]
+    with conf_file.open() as json_file:
+        conf_data = json.load(json_file)
 
-    vesselGeomFile = workDir + "/" + confData["geometry_original_stl"]
-    
-    haveStent = False
-    if(len(confData["stent_mesh_base"]) > 0):
-        haveStent = True
-        stentGeomFile = workDir + "/" + confData["stent_mesh_base"] + "mesh.stl"
-    
-    centerLineFile = workDir + "/" + confData["centerline_vtp"]
+    work_dir = Path(conf_data["geometry_dir"])
 
-    outputBaseName =  saveDir + "/" + confData["output_base_name"]
+    geometry_path = work_dir / conf_data["geometry_original_stl"]
+    center_line_file = work_dir / conf_data["centerline_vtp"]
 
-    targetElem = int(confData["target_elements"])
+    output_base_name = save_dir / conf_data["output_base_name"]
+
+    target_elem = int(conf_data["target_elements"])
 
     voxel_stent_final = np.zeros(0)
 
-    startTime = time.time()
+    start_time = time.time()
 
-    print("\n### Voxelizing vessel geometry ###")
-    voxelVol, domainData = voxelize(vesselGeomFile, targetElem)
-    # domainData = voxelize(vesselGeomFile, targetElem)
-
-    if DEBUG_MODE:
-        print("-> (DEBUG) Saving voxelization result")    
-        nrrd.write(outputBaseName+"fluid_only.nrrd", voxelVol)
-
-    sx,sy,sz = domainData[0]
-    tx,ty,tz = domainData[1]
-    
-    print("Voxelized domain size:", voxelVol.shape)
-    print("Domain:", domainData[2])
-    print("Bounding box:", domainData[3])
-    print("Transformation matrix from voxelization:")
-    print("Translate: ",tz, tx, ty)
-    print("Rotate: ", 90, 0, 90)
-    print("Scale: ", sz, sx, sy)
-
-    DX = (1.0/sx)*SI_FACTOR
-    print("dx [m]:", DX)
-
-    print("\n### Extracting information on openings from centerline ###")
-    radiusTangentList = getOpeningsFromCenterline(centerLineFile)
-    print("scale", domainData[0])
-    print("translate", domainData[1])
-    radiusTangentVoxelList = convertToVoxelspace(radiusTangentList, domainData[0], domainData[1])
-    
-    cutList = generateCutList(domainData[2], radiusTangentVoxelList)
-    
-    print("Computed list of sides to cut away for openings:", cutList)
-    
-    print("\n### Creating walls and opening in/outlets ###")
-    start = time.time()
-    volWithWalls, sliced = createWalls(voxelVol, cutList, cutWidth)
-    end = time.time()
-    print(f"Creating wall time: {end - start}")
+    logger.info("Voxelizing vessel geometry")
+    voxel_vol, domain_data = voxelize(geometry_path, target_elem)
 
     if DEBUG_MODE:
-        print("\n-> (DEBUG) Saving nrrd wall geometry ###")    
-        nrrd.write(outputBaseName+"wall_fluid.nrrd", volWithWalls)
+        logger.debug("Saving voxelization result")
+        nrrd.write(output_base_name + "fluid_only.nrrd", voxel_vol)
 
-    print("Size after cutting layers for openings:", volWithWalls.shape)
-    volume = np.product(volWithWalls.shape)
-    fluids = np.count_nonzero(volWithWalls == 2)
-    print("Volume:", volume)
-    print("Fluid nodes:", fluids)
-    print("Fluid ratio:", fluids / volume)
-    print("Walls:", np.count_nonzero(volWithWalls == 1))
+    scale = domain_data[0]
+    shift = domain_data[1]
+    domain = domain_data[2]
+    bounding_box = domain_data[3]
+    sx, sy, sz = scale
+    tx, ty, tz = shift
 
-    print("\n### Detecting and assigning voxel openings ###")
+    logger.info("Voxelized domain size: %s", voxel_vol.shape)
+    logger.info("Domain: %s", domain)
+    logger.info("Bounding box: %s", bounding_box)
+    logger.info("Transformation matrix from voxelization:")
+    logger.info("Translate: %s %s %s", tz, tx, ty)
+    logger.info("Rotate: %s %s %s", 90, 0, 90)
+    logger.info("Scale: %s %s %s", sz, sx, sy)
+
+    DX = (1.0 / sx) * SI_FACTOR
+    logger.info("dx [m]: %s", DX)
+
+    logger.info("Extracting information on openings from centerline")
+    radius_tangent_list = get_openings_from_center_line(center_line_file)
+    logger.info("Scale: %s", scale)
+    logger.info("Translate: %s", shift)
+    radius_tangent_voxel_list = convert_to_voxelspace(
+        radius_tangent_list,
+        domain_data[0],
+        domain_data[1],
+    )
+
+    cut_list = generate_cut_list(domain, radius_tangent_voxel_list, distance)
+
+    logger.info("Computed list of sides to cut away for openings: %s", cut_list)
+
+    logger.info("Creating walls and opening in/outlets")
     start = time.time()
-    opening_ids, openingCenters, Inlets_outlets_voxles, paintedOpenings = detectOpenings(volWithWalls, outputBaseName+"wall_fluid.nrrd")
+    vol_with_walls, sliced = createWalls(voxel_vol, cut_list, cut_width)
     end = time.time()
-    print(f"Detecting opening time: {end - start}")
+    logger.info("Creating wall time: %s", end - start)
+
+    if DEBUG_MODE:
+        logger.debug("Saving nrrd wall geometry")
+        nrrd.write(output_base_name + "wall_fluid.nrrd", vol_with_walls)
+
+    logger.info("Size after cutting layers for openings: %s", vol_with_walls.shape)
+    volume = np.prod(vol_with_walls.shape)
+    fluids = np.count_nonzero(vol_with_walls == 2)
+    logger.info("Volume: %s", volume)
+    logger.info("Fluid nodes: %s", fluids)
+    logger.info("Fluid ratio: %s", fluids / volume)
+    logger.info("Walls: %s", np.count_nonzero(vol_with_walls == 1))
+
+    logger.info("Detecting and assigning voxel openings")
+    start = time.time()
+    opening_ids, opening_centers, Inlets_outlets_voxles, painted_openings = (
+        detectOpenings(vol_with_walls, output_base_name + "wall_fluid.nrrd")
+    )
+    end = time.time()
+    logger.info("Detecting opening time: %s", end - start)
 
     # TODO: Assign tangents and radii to voxelized openings
-    
-    if len(openingCenters) != len(radiusTangentVoxelList):
-        print("!!! ERROR: the number of outlets found on the voxelized domain sides differ from the number found along the centerline! :", len(radiusTangentVoxelList), len(openingCenters))
-        sys.exit(-1)
-    
-    # The combined information about openings in the correct order (Inlet, Pressure outlet, Other velocity outlets)
-    openingIndex = []
-    openingRadius = []
-    openingNormalizedQratio = []
-    openingCenter = []
-    openingTangent = []
-    
-    # Radial ratio of outlets, note: Qinlet = 1, so it is not included
-    r3Tot = np.sum([x[0]**3 for x in radiusTangentVoxelList[1:]])
-    
-    for ccVox in range(len(openingCenters)):
-        for ccCL in range(len(radiusTangentVoxelList)):
-            cVox = openingCenters[ccVox]
-            rCL = radiusTangentVoxelList[ccCL]
-            cCL = rCL[1]
 
-            if inRange3D(cVox, (cCL[0], cCL[1], cCL[2]), distance) is True:
-                openingIndex.append(opening_ids[ccVox])
-                openingRadius.append(rCL[0]*SI_FACTOR)
-                openingNormalizedQratio.append(rCL[0]**3/r3Tot)  # TODO: it also assigns a number to the inlet, disredards that
-                openingCenter.append(cVox)
-                openingTangent.append( np.array((rCL[2][0], rCL[2][1], rCL[2][2])) )
+    if len(opening_centers) != len(radius_tangent_voxel_list):
+        logger.error(
+            "The number of outlets found on the voxelized domain sides differs "
+            "from the number found along the centerline: centerline=%s, voxelized=%s",
+            len(radius_tangent_voxel_list),
+            len(opening_centers),
+        )
+        sys.exit(-1)
+
+    # The combined information about openings in the correct order
+    # (Inlet, Pressure outlet, Other velocity outlets)
+    opening_index = []
+    opening_radius = []
+    opening_normalized_qratio = []
+    opening_center = []
+    opening_tangent = []
+
+    # Radial ratio of outlets, note: Qinlet = 1, so it is not included
+    r3_tot = np.sum([x[0] ** 3 for x in radius_tangent_voxel_list[1:]])
+
+    for cc_vox in range(len(opening_centers)):
+        for cc_cl in range(len(radius_tangent_voxel_list)):
+            c_vox = opening_centers[cc_vox]
+            r_cl = radius_tangent_voxel_list[cc_cl]
+            c_cl = r_cl[1]
+
+            if in_range_3d(c_vox, (c_cl[0], c_cl[1], c_cl[2]), distance) is True:
+                opening_index.append(opening_ids[cc_vox])
+                opening_radius.append(r_cl[0] * SI_FACTOR)
+                opening_normalized_qratio.append(
+                    r_cl[0] ** 3 / r3_tot,
+                )  # TODO: it also assigns a number to the inlet, disredards that
+                opening_center.append(c_vox)
+                opening_tangent.append(np.array((r_cl[2][0], r_cl[2][1], r_cl[2][2])))
 
     if DEBUG_MODE:
-        print("-> (DEBUG) Saving nrrd geometry flag")    
-        nrrd.write(outputBaseName+"geometry.nrrd", paintedOpenings)
-        if len(openingIndex) != len(openingCenters):
-            print("-> (DEBUG) Number of matched openings is incorrect:", len(openingIndex), "insead of", len(openingCenters))
+        logger.debug("Saving nrrd geometry flag")
+        nrrd.write(output_base_name + "geometry.nrrd", painted_openings)
+        if len(opening_index) != len(opening_centers):
+            logger.debug(
+                "Number of matched openings is incorrect: %s instead of %s",
+                len(opening_index),
+                len(opening_centers),
+            )
 
-    print("\n### Saving final output ###")
-    print("File:", outputBaseName+"c.npz")
+    logger.info("Saving final output")
+    logger.info("File: %s", output_base_name + "ops.npz")
 
-    #np.savez(sys.argv[2]+".npz", geometryFlag=paintedOpenings, openingDescr=openingDescr, stent=voxel_stent_final.astype(np.short, copy=False))
-    np.savez_compressed(outputBaseName+"ops.npz",
-                        dx=np.array([DX]).astype(np.double, copy=False),
-                        openingIndex=np.array(openingIndex).astype(np.int8, copy=False), 
-                        openingRadius=np.array(openingRadius).astype(np.double, copy=False), 
-                        openingNormalizedQRatio=np.array(openingNormalizedQratio).astype(np.double, copy=False), 
-                        openingCenter=np.array(openingCenter).astype(np.double, copy=False), 
-                        openingTangent=np.array(openingTangent).astype(np.double, copy=False), 
-                        stent=voxel_stent_final.astype(np.short, copy=False),
-                        Nx=paintedOpenings.shape[0], Ny=paintedOpenings.shape[1], Nz=paintedOpenings.shape[2])
-    
-    print(paintedOpenings.max())
-    
+    np.savez_compressed(
+        output_base_name + "ops.npz",
+        dx=np.array([DX]).astype(np.double, copy=False),
+        openingIndex=np.array(opening_index).astype(np.int8, copy=False),
+        openingRadius=np.array(opening_radius).astype(np.double, copy=False),
+        openingNormalizedQRatio=np.array(opening_normalized_qratio).astype(
+            np.double,
+            copy=False,
+        ),
+        openingCenter=np.array(opening_center).astype(np.double, copy=False),
+        openingTangent=np.array(opening_tangent).astype(np.double, copy=False),
+        stent=voxel_stent_final.astype(np.short, copy=False),
+        Nx=painted_openings.shape[0],
+        Ny=painted_openings.shape[1],
+        Nz=painted_openings.shape[2],
+    )
+
+    logger.info("Maximum geometry flag: %s", painted_openings.max())
+
     # Create an HDF5 file to save the geometry flag seperately
-    with h5py.File(outputBaseName+"gf.h5", "w") as f:
+    with h5py.File(output_base_name + "gf.h5", "w") as f:
         # Create a dataset in the file and store the array
-        dset = f.create_dataset("geometryFlag", shape=paintedOpenings.flatten().shape, 
-                                data=paintedOpenings.flatten().astype(np.int8), dtype=np.int8,
-                                compression="gzip", compression_opts=9)
+        dset = f.create_dataset(
+            "geometryFlag",
+            shape=painted_openings.flatten().shape,
+            data=painted_openings.flatten().astype(np.int8),
+            dtype=np.int8,
+            compression="gzip",
+            compression_opts=9,
+        )
 
-    endTime = time.time()
-    timeElapsed = int(round((endTime - startTime)))
-    print("\n### DONE :) -> Elapsed total time:", timeElapsed, "[s]")
+    end_time = time.time()
+    time_elapsed = round(end_time - start_time)
+    logger.info("Done -> Elapsed total time: %s [s]", time_elapsed)
