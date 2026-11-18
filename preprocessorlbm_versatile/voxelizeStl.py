@@ -8,7 +8,7 @@ import numpy as np
 import stl
 
 import perimeter
-from geometry_types import Triangle
+from geometryTypes import Triangle
 from slice import (
     calculate_scale_and_shift,
     scale_and_shift_mesh,
@@ -40,6 +40,40 @@ def voxelize(
         list[list[float]],
     ],
 ]:
+    """Rasterize an STL mesh into a zero-padded voxel domain.
+
+    Parameters
+    ----------
+    input_path : Path
+        STL file to load. Only its filename is used, so it must be accessible
+        from the current working directory.
+    target_elements : int
+        Target resolution used to calculate the scale when domain_data is None.
+    domain_data : tuple, optional
+        Existing (scale, shift, domain, bounding_box) to use instead of
+        calculating a new voxel coordinate system.
+    rotation : int
+        Swap x/y before slicing for 0, or y/z for 1; other values leave the
+        slicing axes unchanged. The swaps are undone before returning.
+    is_mesh_a_shell : bool
+        Rasterize only the mesh boundary if True; otherwise fill slice interiors.
+
+    Returns
+    -------
+    tuple
+        An int8 occupancy array in (x, y, z) order and the metadata tuple
+        (scale, shift, domain, bounding_box). Occupied voxels are 1. The output
+        voxel domain is padded with one layer of zeros on every face.
+        The metadata domain records the padded shape before the final axis
+        swaps, rather than necessarily matching the returned array's shape.
+
+    Notes
+    -----
+    Slices are processed by 16 workers using the fork start method. Interior
+    filling assumes slice contours support outside-to-inside crossing parity;
+    open contours are not automatically capped or repaired.
+
+    """
     mesh = list(import_stl_file(input_path))
 
     if domain_data is None:
@@ -109,10 +143,15 @@ def render_slice(
     domain: list[int],
     *,
     is_mesh_a_shell: bool = False,
-) -> np.ndarray:
-    """Create a voxelized slice of the mesh at the given height in voxel units."""
+) -> np.ndarray[tuple[int, int], np.dtype[np.bool]]:
+    """Rasterize the mesh intersection with the z-plane at height.
+
+    Mesh coordinates and height are in voxel units. Return an unpadded boolean
+    array indexed as (x, y), with shape (domain[0], domain[1]). Boundary pixels
+    are True; interiors are also filled unless is_mesh_a_shell is True.
+    """
     lines = to_intersecting_lines(mesh, height)
-    prepixel = np.zeros((domain[0], domain[1]), dtype=bool)
+    prepixel = np.zeros((domain[0], domain[1]), dtype=np.bool)
     perimeter.lines_to_voxels(lines, prepixel, is_shell=is_mesh_a_shell)
     return prepixel
 
@@ -120,7 +159,12 @@ def render_slice(
 def import_stl_file(
     input_path: Path,
 ) -> Generator[Triangle]:
-    """Create a generator for the points of each triangle in the stl mesh."""
+    """Load an STL file and return an iterator over its valid triangle vertices.
+
+    Only input_path.name is passed to the loader, so the file is resolved
+    relative to the current working directory. Faces with duplicate vertices
+    are excluded by get_stl_faces.
+    """
     imported_mesh = stl.mesh.Mesh.from_file(input_path.name)
     return get_stl_faces(imported_mesh)
 
@@ -128,7 +172,11 @@ def import_stl_file(
 def get_stl_faces(
     mesh: stl.mesh.Mesh,
 ) -> Generator[Triangle]:
-    """Yield three valid points for each triangle."""
+    """Yield each mesh face as a tuple of three vertex coordinate tuples.
+
+    Skip faces whose vertices are not distinct according to
+    remove_dups_from_point_list; collinearity is not checked.
+    """
     for i, j, k in zip(mesh.v0, mesh.v1, mesh.v2, strict=True):
         v1, v2, v3 = tuple(i), tuple(j), tuple(k)
         corners = 3

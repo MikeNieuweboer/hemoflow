@@ -47,6 +47,7 @@ def get_openings_from_center_line(
     reader.Update()
 
     data: vtk.vtkPolyData = reader.GetOutput()
+    print(data)
     points = data.GetPoints()
     point_data = data.GetPointData()
     radius_data = point_data.GetArray("MaximumInscribedSphereRadius")

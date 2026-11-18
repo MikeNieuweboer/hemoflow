@@ -2,7 +2,7 @@ from collections.abc import Generator
 
 import numpy as np
 
-from geometry_types import Line
+from geometryTypes import Line
 
 
 def lines_to_voxels(

@@ -1,4 +1,4 @@
-from geometry_types import Vector
+from geometryTypes import Vector
 import numpy as np
 
 

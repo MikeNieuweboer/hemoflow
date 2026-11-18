@@ -8,16 +8,17 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from createFluidSolid import createWalls
-from detectOpenings import detectOpenings
+from createFluidSolid import create_walls
+from detectOpenings import detect_openings
 from readCL import convert_to_voxelspace, get_openings_from_center_line
 from voxelizeStl import voxelize
 
 logger = logging.getLogger(__name__)
 
 
-def in_range(value: float, range_value: float, distance: int) -> np.bool_:
-    return np.abs(range_value - value) < distance
+def in_range(x: float, y: float, distance: float) -> bool:
+    """Check whether x and y are at most distance away from eachother."""
+    return np.abs(y - x) < distance
 
 
 def in_range_3d(
@@ -33,16 +34,17 @@ def in_range_3d(
 
 
 def generate_cut_list(
-    voxelDomainSize: list[int] | tuple[int, int, int],
+    voxel_domain_size: list[int],
     radius_tangent_voxel_list: list[tuple[float, np.ndarray, np.ndarray]],
     distance: int = 4,
 ) -> np.ndarray:
     sides_to_cut = np.zeros(6)
 
-    # If centerline point is within this distance of the boundary it is considered an opening
-    # Cutting away unused layers might influence this distance.
+    # If centerline point is within this distance of the boundary it is
+    # considered an opening Cutting away unused layers might influence this
+    # distance.
 
-    logger.debug("Generating cutlist -> voxelDomainSize: %s", voxelDomainSize)
+    logger.debug("Generating cutlist -> voxelDomainSize: %s", voxel_domain_size)
 
     for o in radius_tangent_voxel_list:
         pos = o[1]
@@ -52,7 +54,7 @@ def generate_cut_list(
         for j in range(3):
             if in_range(pos[j], 0, distance):
                 sides_to_cut[j * 2] = 1
-            if in_range(pos[j], voxelDomainSize[j], distance):
+            if in_range(pos[j], voxel_domain_size[j], distance):
                 sides_to_cut[j * 2 + 1] = 1
 
     return np.where(sides_to_cut == 1)[0]
@@ -173,7 +175,7 @@ if __name__ == "__main__":
 
     logger.info("Creating walls and opening in/outlets")
     start = time.time()
-    vol_with_walls, sliced = createWalls(voxel_vol, cut_list, cut_width)
+    vol_with_walls, _ = create_walls(voxel_vol, cut_list, cut_width)
     end = time.time()
     logger.info("Creating wall time: %s", end - start)
 
@@ -192,7 +194,7 @@ if __name__ == "__main__":
     logger.info("Detecting and assigning voxel openings")
     start = time.time()
     opening_ids, opening_centers, Inlets_outlets_voxles, painted_openings = (
-        detectOpenings(vol_with_walls, output_base_name + "wall_fluid.nrrd")
+        detect_openings(vol_with_walls)
     )
     end = time.time()
     logger.info("Detecting opening time: %s", end - start)

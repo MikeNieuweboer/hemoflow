@@ -1,6 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Sep 07 16:32:07 2011
+"""Created on Wed Sep 07 16:32:07 2011.
 
 @author: Gábor Závodszky
 
@@ -13,22 +11,24 @@ Output labeling:
     1 - wall
     2 - fluidx
 
-	
+
 Short description:
-	Takes a boolean voxel description as input and outputs
+        Takes a boolean voxel description as input and outputs
     wall and fluidx cells to nrrd.
-	
+
 """
 
-import numpy as np
-import multiprocessing
 import time
 
+import numpy as np
+
+
 def roll_zeropad(
-    a: np.ndarray, shift: int, axis: int | None = None,
+    a: np.ndarray,
+    shift: int,
+    axis: int | None = None,
 ) -> np.ndarray:
-    """
-    Roll array elements along a given axis.
+    """Roll array elements along a given axis.
 
     Elements off the end of the array are treated as zeros.
 
@@ -55,9 +55,9 @@ def roll_zeropad(
                given position.
 
     """
-    
     a = np.asanyarray(a)
-    if shift == 0: return a
+    if shift == 0:
+        return a
     if axis is None:
         n = a.size
         reshape = True
@@ -68,94 +68,89 @@ def roll_zeropad(
         res = np.zeros_like(a)
     elif shift < 0:
         shift += n
-        zeros = np.zeros_like(a.take(np.arange(n-shift), axis))
-        res = np.concatenate((a.take(np.arange(n-shift,n), axis), zeros), axis)
+        zeros = np.zeros_like(a.take(np.arange(n - shift), axis))
+        res = np.concatenate((a.take(np.arange(n - shift, n), axis), zeros), axis)
     else:
-        zeros = np.zeros_like(a.take(np.arange(n-shift,n), axis))
-        res = np.concatenate((zeros, a.take(np.arange(n-shift), axis)), axis)
+        zeros = np.zeros_like(a.take(np.arange(n - shift, n), axis))
+        res = np.concatenate((zeros, a.take(np.arange(n - shift), axis)), axis)
     if reshape:
         return res.reshape(a.shape)
-    else:
-        return res
-    
-def removeUnusedOuterLayers(
+    return res
+
+
+def remove_unused_outer_layers(
     data: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Remove all outer layers in the voxel space containing no positive numbers.
 
+    Returns
+    -------
+    A tuple of the sliced data and an array containing how the original data was sliced.
+
+    """
     print("Removing unused outer layers...")
 
-    x,y,z = data.shape
-    sliced = np.array([0,x,0,y,0,z])
+    x, y, z = data.shape
+    sliced = np.array([0, x, 0, y, 0, z])
 
     print("Original bounds:", sliced)
-    
-    while(np.max(data[sliced[0],:,:]) == 0):
-        sliced[0] = sliced[0]+1
-        #data = data[1:,:,:]
-    while(np.max(data[sliced[1]-1,:,:]) == 0):
-        sliced[1] = sliced[1]-1
-        #data = data[:-1,:,:]
-    while(np.max(data[:,sliced[2],:]) == 0):
-        sliced[2] = sliced[2]+1
-        #data = data[:,1:,:]
-    while(np.max(data[:,sliced[3]-1,:]) == 0):
-        sliced[3] = sliced[3]-1
-        #data = data[:,:-1,:]
-    while(np.max(data[:,:,sliced[4]]) == 0):
-        sliced[4] = sliced[4]+1
-        #data = data[:,:,1:]
-    while(np.max(data[:,:,sliced[5]-1]) == 0):
-        sliced[5] = sliced[5]-1
-        #data = data[:,:,:-1]
 
-    data = data[sliced[0]:sliced[1],sliced[2]:sliced[3],sliced[4]:sliced[5]]
+    while np.max(data[sliced[0], :, :]) == 0:
+        sliced[0] = sliced[0] + 1
+    while np.max(data[sliced[1] - 1, :, :]) == 0:
+        sliced[1] = sliced[1] - 1
+    while np.max(data[:, sliced[2], :]) == 0:
+        sliced[2] = sliced[2] + 1
+    while np.max(data[:, sliced[3] - 1, :]) == 0:
+        sliced[3] = sliced[3] - 1
+    while np.max(data[:, :, sliced[4]]) == 0:
+        sliced[4] = sliced[4] + 1
+    while np.max(data[:, :, sliced[5] - 1]) == 0:
+        sliced[5] = sliced[5] - 1
+
+    data = data[sliced[0] : sliced[1], sliced[2] : sliced[3], sliced[4] : sliced[5]]
 
     print("Bounds after removing unused layers:", sliced)
 
     return data, sliced
 
-def createWalls(
-    inputArray: np.ndarray,
-    cutList: list[int] | np.ndarray,
-    cutWidxth: int = 1,
-) -> tuple[np.ndarray, np.ndarray]:
-    
-    data1 = inputArray
-    # Add extra layer of 0 (widxth 1) to allow for fluidx next to the domain boundary.
-    # data1 = np.pad(inputArray, 1, 'constant')
 
-    #Create a cpoy
-    data2 = np.copy(data1)
+def create_walls(
+    fluid_voxels: np.ndarray,
+    cut_list: list[int] | np.ndarray,
+    cut_width: int = 1,
+) -> tuple[np.ndarray, np.ndarray]:
+    all_voxels = np.copy(fluid_voxels)
 
     print("Calculating boundary...")
-    
+
     start = time.time()
 
     # Serial
-    #Circular bool shift to paint walls
-    for l in range(-1,2):
-        a = roll_zeropad(data1,l,0)
-        for m in range(-1,2):
-            b = roll_zeropad(a,m,1)
-            for n in range(-1,2):
-                c = roll_zeropad(b,n,2)
-                data2 = data2 | c
-    
+    # Circular bool shift to paint walls
+    for l in range(-1, 2):
+        a = roll_zeropad(fluid_voxels, l, 0)
+        for m in range(-1, 2):
+            b = roll_zeropad(a, m, 1)
+            for n in range(-1, 2):
+                c = roll_zeropad(b, n, 2)
+                all_voxels = all_voxels | c
+
     end = time.time()
     print(f"roll_zeropad time: {end - start}")
-                
-    #cut out fluidx part, so wall remains
-    data3 = data2-data1
-    
-    #Convert datatype to int to allow third label
-    data3 = data3.astype('int8')
-    
-    #Paint fluidx cells back
-    data3[data1==1]=2
+
+    # cut out fluidx part, so wall remains
+    wall_voxels = all_voxels - fluid_voxels
+
+    # Convert datatype to int to allow third label
+    wall_voxels = wall_voxels.astype("int8")
+
+    # Paint fluidx cells back
+    wall_voxels[fluid_voxels == 1] = 2
 
     # Remove layers with no information
     start = time.time()
-    data3, sliced = removeUnusedOuterLayers(data3)
+    wall_voxels, sliced = remove_unused_outer_layers(wall_voxels)
     end = time.time()
     print(f"removeUnusedOuterLayers time: {end - start}")
 
@@ -165,34 +160,37 @@ def createWalls(
     # 4,5 => Zmin, Zmax
 
     # Cut outer layer (x,y,z)
-    if 0 in cutList:
-        data3 = data3[cutWidxth:,:,:]
-    if 1 in cutList:
-        data3 = data3[:-cutWidxth,:,:]
-    if 2 in cutList:
-        data3 = data3[:,cutWidxth:,:]
-    if 3 in cutList:
-        data3 = data3[:,:-cutWidxth,:]
-    if 4 in cutList:
-        data3 = data3[:,:,cutWidxth:]
-    if 5 in cutList:
-        data3 = data3[:,:,:-cutWidxth]
+    if 0 in cut_list:
+        wall_voxels = wall_voxels[cut_width:, :, :]
+    if 1 in cut_list:
+        wall_voxels = wall_voxels[:-cut_width, :, :]
+    if 2 in cut_list:
+        wall_voxels = wall_voxels[:, cut_width:, :]
+    if 3 in cut_list:
+        wall_voxels = wall_voxels[:, :-cut_width, :]
+    if 4 in cut_list:
+        wall_voxels = wall_voxels[:, :, cut_width:]
+    if 5 in cut_list:
+        wall_voxels = wall_voxels[:, :, :-cut_width]
 
-    return data3.astype('int8', copy=False), sliced
+    return wall_voxels.astype("int8", copy=False), sliced
 
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) < 3:
-        print("Usage:", sys.argv[0], "input.nrrd output.nrrd \"<list of sidxes to cut>\" ")
-        print("    e.g.:", sys.argv[0], "input.nrrd output.nrrd \"0 5\" ")
-        sys.exit(-1) 
-    
+        print(
+            "Usage:", sys.argv[0], 'input.nrrd output.nrrd "<list of sidxes to cut>" '
+        )
+        print("    e.g.:", sys.argv[0], 'input.nrrd output.nrrd "0 5" ')
+        sys.exit(-1)
+
     import nrrd
 
     print("Loading data files...")
-    
-    #Lodaing input array
+
+    # Lodaing input array
     data1, data_header = nrrd.read(sys.argv[1])
 
     if len(sys.argv) > 3:
@@ -200,10 +198,10 @@ if __name__ == "__main__":
     else:
         cutList = []
 
-    data2 = createWalls(data1, cutList)
+    data2 = create_walls(data1, cutList)
 
-    print("Saving...")    
-    
+    print("Saving...")
+
     nrrd.write(sys.argv[2], data2)
-        
+
     print("Done.")

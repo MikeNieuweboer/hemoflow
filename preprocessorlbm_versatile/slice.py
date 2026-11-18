@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from geometry_types import Line, Triangle, Vector
+from geometryTypes import Line, Triangle, Vector
 
 
 def to_intersecting_lines(
