@@ -3,6 +3,7 @@ name = "preprocessorlbm-versatile"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+  "gitpython>=3.2.1",
   "h5py>=3.16.0",
   "numpy>=2.5.5",
   "numpy-stl>=4.1.4",

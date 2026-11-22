@@ -6,7 +6,8 @@ Run from the repository root: `python preprocessorlbm_versatile/main.py /path/to
 
 ## Flow and dependencies
 
-1. `main.py` reads JSON; `geometry_dir` locates STL/VTP inputs, while the config's directory receives outputs. Required keys and units are documented in [AGENTS.md](../AGENTS.md).
+1. `main.py` reads JSON; `geometry_dir` locates STL/VTP inputs and resolves the output prefix. Required keys and units are documented in [AGENTS.md](../AGENTS.md).
+   The CLI accepts only the config path and `--debug`; JSON options `si_factor`, `cut_width`, and `distance` default to `0.001`, `1`, and `4`, respectively.
 2. `voxelizeStl.py` uses numpy-stl → `slice.py` triangle intersections → `perimeter.py` rasterization; `util.py` pads the result. Internal slice order is rearranged to `(x,y,z)` before return.
 3. `readCL.py` uses VTK to extract endpoint radii, centers, and tangents, then converts positions to voxel space. `main.py` derives boundary cuts and calls `createFluidSolid.py` to paint walls/fluid.
 4. `detectOpenings.py` groups and paints openings using `constants.py`; `main.py` matches centers to centerline endpoints, then saves metadata and geometry separately.
@@ -20,6 +21,7 @@ Function signatures use concrete lists/tuples for geometry and opening data, exp
 
 | File | Responsibility |
 | --- | --- |
+| `config.template.json` | Copyable JSON configuration template containing required input/output fields and optional preprocessing settings with their defaults. |
 | `main.py` | Pipeline/JSON entrypoint. Writes `output_base_name + "ops.npz"` with opening arrays, `dx`, dimensions, and an empty `stent` array; writes `output_base_name + "gf.h5"` with gzip-compressed flattened int8 `geometryFlag`. Stent paths are parsed but no stent voxelization runs here. |
 | `voxelizeStl.py` | STL loading, scale/shift, slice rendering, padding, and axis swaps. Explicitly sets multiprocessing to `fork` inside `voxelize()` and uses 16 workers; repeated calls in one process can fail when resetting the start method. |
 | `slice.py` | Triangle/plane intersections, interpolation, bounding-box-based target resolution, transforms, and axis swaps. Imports `perimeter.py` and distance/deduplication helpers from `util.py`. |

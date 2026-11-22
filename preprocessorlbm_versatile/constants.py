@@ -1,7 +1,7 @@
-from enum import Enum
+from enum import IntEnum
 
 
-class VoxelType(Enum):
+class VoxelType(IntEnum):
     """Per voxel class identifier."""
 
     UNUSED_VOXEL = 0

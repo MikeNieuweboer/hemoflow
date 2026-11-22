@@ -1,7 +1,7 @@
-from itertools import product
 import sys
 import time
 from collections.abc import Generator
+from itertools import product
 from typing import Literal
 
 import numpy as np
@@ -316,7 +316,12 @@ def paint_inlets_outlets(
 
 def detect_openings(
     input_array: np.ndarray,
-) -> tuple[list[VoxelType], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray]:
+) -> tuple[
+    list[VoxelType],
+    list[np.ndarray],
+    list[list[tuple[int, int, int]]],
+    np.ndarray,
+]:
     sys.setrecursionlimit(10000000)
 
     # Append surrounding layer to avoid boundary checking (THIS SHOULD NOT
@@ -325,7 +330,8 @@ def detect_openings(
     # just comment the following line out.
     # TODO: Function seems incorrect due to overwriting of padding.
     data = np.pad(input_array, 1, "constant", constant_values=(VoxelType.UNUSED_VOXEL,))
-    data = input_array
+    # NOTE: This code was uncommented in the original code; why?
+    # data = input_array
 
     # Detect openings
     opening_ids, opening_center, inlets_outlets, result = detect_inlets_outlets(data)

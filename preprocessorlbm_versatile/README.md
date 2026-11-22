@@ -2,7 +2,34 @@
 
 ## Usage
 
-See main.py for execution arguments.
+```bash
+python main.py /path/to/input.json [--debug]
+```
+
+Only the config path and optional `--debug` flag are command-line arguments.
+Copy `config.template.json` and fill in your geometry paths and desired settings.
+Set preprocessing parameters in the JSON config:
+
+```json
+{
+  "geometry_dir": "/path/to/geometry",
+  "geometry_original_stl": "vessel.stl",
+  "centerline_vtp": "centerline.vtp",
+  "output_base_name": "vessel_",
+  "target_elements": 1000000,
+  "si_factor": 0.001,
+  "cut_width": 1,
+  "distance": 4
+}
+```
+
+The last three fields are optional:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `si_factor` | `0.001` | Geometry unit conversion factor to meters (default assumes millimeters). |
+| `cut_width` | `1` | Number of voxel layers to cut at openings. |
+| `distance` | `4` | Voxel tolerance for boundary cuts and opening matching. |
 
 Input: JSON config file
 Output: voxelized geometry
@@ -43,4 +70,3 @@ Tested with Anaconda and Python 3.7
 - 10 inlet (velocity)
 - 11 outlet 1 (pressure)
 - 12... other outlets (velocity)
-

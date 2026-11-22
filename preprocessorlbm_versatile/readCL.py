@@ -47,11 +47,10 @@ def get_openings_from_center_line(
 
     """
     reader = vtk.vtkXMLPolyDataReader()
-    reader.SetFileName(file_path.name)
+    reader.SetFileName(str(file_path))
     reader.Update()
 
     data: vtk.vtkPolyData = reader.GetOutput()
-    print(data)
     points = data.GetPoints()
     point_data = data.GetPointData()
     radius_data = point_data.GetArray("MaximumInscribedSphereRadius")
@@ -61,7 +60,7 @@ def get_openings_from_center_line(
 
     r_tan_data = []
 
-    # TODO:
+    # TODO: figure out how these lines are represented
     # inlet line ids. Note, only is correct with the current centerline file !!!!!!!!
     # How did I know? Hardcoded...... dumb but useful, need to find a portable way
     # VMTK has some problems with multiple inlets geometry, therefore need to hardcode

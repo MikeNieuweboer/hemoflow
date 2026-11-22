@@ -6,7 +6,7 @@ from geometryTypes import Line, Triangle, Vector
 def to_intersecting_lines(
     mesh: list[Triangle],
     height: float,
-) -> list[tuple[tuple[float, float, float], tuple[float, float, float]]]:
+) -> list[tuple[Vector, Vector]]:
     relevant_triangles = list(filter(lambda tri: is_above_and_below(tri, height), mesh))
     not_tame_triangles = filter(
         lambda tri: not is_intersecting_triangle(tri, height),
@@ -38,7 +38,7 @@ def linear_interpolation(
 
 
 def is_above_and_below(
-    point_list: list[Vector],
+    point_list: Triangle,
     height: float,
 ) -> bool:
     """:param pointList: Can be line or triangle
@@ -172,7 +172,7 @@ def scale_and_shift_mesh(
             newpt = [0, 0, 0]
             for i in range(3):
                 newpt[i] = (pt[i] + shift[i]) * scale[i]
-            shifted_point: Vector = tuple(new_tri)  # ty: ignore[invalid-assignment]
+            shifted_point: Vector = tuple(newpt)  # ty: ignore[invalid-assignment]
             new_tri.append(shifted_point)
         yield new_tri  # ty: ignore[invalid-yield]
 

@@ -5,6 +5,7 @@ import sys
 import time
 from pathlib import Path
 
+import git
 import h5py
 import numpy as np
 
@@ -58,16 +59,8 @@ def generate_cut_list(
 
     return np.where(sides_to_cut == 1)[0]
 
-class Arguments(argparse.Namespace):
-    """Class definition of input arguments."""
 
-    config: Path
-    debug: bool
-    si_factor: float
-    cut_width: int
-    distance: int
-
-def parse_arguments() -> Arguments:
+def parse_arguments() -> argparse.Namespace:
     """Parse arguments required for preprocessing."""
     parser = argparse.ArgumentParser(
         description="Voxelize vessel geometry using a JSON configuration.",
@@ -78,32 +71,13 @@ def parse_arguments() -> Arguments:
         action="store_true",
         help="Enable DEBUG logging and intermediate NRRD output",
     )
-    parser.add_argument(
-        "--si-factor",
-        type=float,
-        default=0.001,
-        help="Geometry unit conversion factor to meters (default: 0.001, millimeters)",
-    )
-    parser.add_argument(
-        "--cut-width",
-        type=int,
-        default=1,
-        help="Number of voxel layers to cut at openings (default: 1)",
-    )
-    parser.add_argument(
-        "--distance",
-        type=int,
-        default=4,
-        help="Voxel tolerance for boundary cuts and opening matching (default: 4)",
-    )
-    return parser.parse_args(namespace=Arguments())
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
     # Setup
     args = parse_arguments()
     DEBUG_MODE = args.debug
-    SI_FACTOR = args.si_factor
 
     logging.basicConfig(
         level=logging.DEBUG if DEBUG_MODE else logging.INFO,
@@ -112,21 +86,22 @@ if __name__ == "__main__":
     if DEBUG_MODE:
         import nrrd
 
-    cut_width = args.cut_width
-    distance = args.distance
-
     conf_file: Path = args.config
-    save_dir = conf_file.parent
 
     with conf_file.open() as json_file:
-        conf_data = json.load(json_file)
+        conf_data: dict = json.load(json_file)
 
-    work_dir = Path(conf_data["geometry_dir"])
+    SI_FACTOR = float(conf_data["si_factor"])
+    cut_width = int(conf_data["cut_width"])
+    distance = int(conf_data["distance"])
+
+    root_dir = Path(git.Repo(".", search_parent_directories=True).git_dir).parent
+    work_dir = root_dir / conf_data["geometry_dir"]
 
     geometry_path = work_dir / conf_data["geometry_original_stl"]
     center_line_file = work_dir / conf_data["centerline_vtp"]
 
-    output_base_name = save_dir / conf_data["output_base_name"]
+    output_base_name = conf_data["output_base_name"]
 
     target_elem = int(conf_data["target_elements"])
 
@@ -138,7 +113,7 @@ if __name__ == "__main__":
 
     if DEBUG_MODE:
         logger.debug("Saving voxelization result")
-        nrrd.write(output_base_name + "fluid_only.nrrd", voxel_vol)
+        nrrd.write(str(work_dir / (output_base_name + "fluid_only.nrrd")), voxel_vol)
 
     scale = domain_data[0]
     shift = domain_data[1]
@@ -161,8 +136,6 @@ if __name__ == "__main__":
     # Reading centerlines.
     logger.info("Extracting information on openings from centerline")
     radius_tangent_list = get_openings_from_center_line(center_line_file)
-    logger.info("Scale: %s", scale)
-    logger.info("Translate: %s", shift)
     radius_tangent_voxel_list = convert_to_voxelspace(
         radius_tangent_list,
         scale,
@@ -182,7 +155,9 @@ if __name__ == "__main__":
 
     if DEBUG_MODE:
         logger.debug("Saving nrrd wall geometry")
-        nrrd.write(output_base_name + "wall_fluid.nrrd", vol_with_walls)
+        nrrd.write(
+            str(work_dir / (output_base_name + "wall_fluid.nrrd")), vol_with_walls
+        )
 
     logger.info("Size after cutting layers for openings: %s", vol_with_walls.shape)
     volume = np.prod(vol_with_walls.shape)
@@ -195,8 +170,8 @@ if __name__ == "__main__":
     # Painting openings.
     logger.info("Detecting and assigning voxel openings")
     start = time.time()
-    opening_ids, opening_centers, inlets_outlets_voxels, vol_painted = (
-        detect_openings(vol_with_walls)
+    opening_ids, opening_centers, inlets_outlets_voxels, vol_painted = detect_openings(
+        vol_with_walls
     )
     end = time.time()
     logger.info("Detecting opening time: %s", end - start)
@@ -231,7 +206,7 @@ if __name__ == "__main__":
                 opening_index.append(opening_ids[opening_i])
                 opening_radius.append(radius * SI_FACTOR)
                 opening_normalized_qratio.append(
-                    radius ** 3 / r3_tot,
+                    radius**3 / r3_tot,
                 )
                 # TODO: it also assigns a number to the inlet, disredards that
                 # TODO: Understand the previous todo.
@@ -243,7 +218,7 @@ if __name__ == "__main__":
 
     if DEBUG_MODE:
         logger.debug("Saving nrrd geometry flag")
-        nrrd.write(output_base_name + "geometry.nrrd", vol_painted)
+        nrrd.write(str(work_dir / (output_base_name + "geometry.nrrd")), vol_painted)
         if len(opening_index) != len(opening_centers):
             logger.debug(
                 "Number of matched openings is incorrect: %s instead of %s",
@@ -252,10 +227,10 @@ if __name__ == "__main__":
             )
 
     logger.info("Saving final output")
-    logger.info("File: %s", output_base_name + "ops.npz")
+    logger.info("File: %s", work_dir / (output_base_name + "ops.npz"))
 
     np.savez_compressed(
-        output_base_name + "ops.npz",
+        work_dir / (output_base_name + "ops.npz"),
         dx=np.array([DX]).astype(np.double, copy=False),
         openingIndex=np.array(opening_index).astype(np.int8, copy=False),
         openingRadius=np.array(opening_radius).astype(np.double, copy=False),

@@ -102,21 +102,33 @@ def voxelize(
     pool = multiprocessing.Pool(16)
 
     # Voxelize each layer in z-direction.
+    # vol = np.array(
+    #     pool.map(
+    #         functools.partial(
+    #             render_slice,
+    #             mesh=mesh,
+    #             domain=domain,
+    #             is_mesh_a_shell=is_mesh_a_shell,
+    #         ),
+    #         range(int(domain[2])),
+    #     ),
+    # )
+
     vol = np.array(
-        pool.map(
-            functools.partial(
-                render_slice,
-                mesh=mesh,
-                domain=domain,
-                is_mesh_a_shell=is_mesh_a_shell,
+        list(
+            map(
+                functools.partial(
+                    render_slice,
+                    mesh=mesh,
+                    domain=domain,
+                    is_mesh_a_shell=is_mesh_a_shell,
+                ),
+                range(int(domain[2])),
             ),
-            range(int(domain[2])),
         ),
     )
 
     pool.close()
-
-    print(vol.shape)
 
     vol = pad_voxel_array(vol)
     domain = list(vol.shape)
@@ -161,11 +173,9 @@ def import_stl_file(
 ) -> Generator[Triangle]:
     """Load an STL file and return an iterator over its valid triangle vertices.
 
-    Only input_path.name is passed to the loader, so the file is resolved
-    relative to the current working directory. Faces with duplicate vertices
-    are excluded by get_stl_faces.
+    Faces with duplicate vertices are excluded by get_stl_faces.
     """
-    imported_mesh = stl.mesh.Mesh.from_file(input_path.name)
+    imported_mesh = stl.mesh.Mesh.from_file(str(input_path))
     return get_stl_faces(imported_mesh)
 
 

@@ -1,0 +1,10 @@
+{
+  "geometry_dir": "/path/to/geometry",
+  "geometry_original_stl": "vessel.stl",
+  "centerline_vtp": "centerline.vtp",
+  "output_base_name": "vessel_",
+  "target_elements": 1000000,
+  "si_factor": 0.001,
+  "cut_width": 1,
+  "distance": 4
+}
