@@ -12,4 +12,6 @@ dependencies = [
 
 [tool.ruff.lint]
 select = ["ALL"]
-ignore = ["INP001", "CPY001"]
+# S101, asserts in code
+# TD002, TD003; Extra todo information.
+ignore = ["INP001", "CPY001", "S101", "TD002", "TD003"]

@@ -17,10 +17,11 @@ Short description:
     wall and fluidx cells to nrrd.
 
 """
-
 import time
 
 import numpy as np
+
+from constants import VoxelType
 
 
 def roll_zeropad(
@@ -144,9 +145,10 @@ def create_walls(
 
     # Convert datatype to int to allow third label
     wall_voxels = wall_voxels.astype("int8")
+    wall_voxels[wall_voxels == 1] = VoxelType.WALL_VOXEL
 
     # Paint fluidx cells back
-    wall_voxels[fluid_voxels == 1] = 2
+    wall_voxels[fluid_voxels == 1] = VoxelType.FLUID_VOXEL
 
     # Remove layers with no information
     start = time.time()

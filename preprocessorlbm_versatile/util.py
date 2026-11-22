@@ -1,5 +1,6 @@
-from geometryTypes import Vector
 import numpy as np
+
+from geometryTypes import Vector
 
 
 def manhattan_distance(
@@ -17,8 +18,7 @@ def manhattan_distance(
 def remove_dups_from_point_list(
     pt_list: list[Vector],
 ) -> tuple[Vector, ...]:
-    new_list = pt_list[:]
-    return tuple(set(new_list))
+    return tuple(set(pt_list))
 
 
 def array_to_white_greyscale_pixel(

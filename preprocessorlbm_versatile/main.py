@@ -22,15 +22,16 @@ def in_range(x: float, y: float, distance: float) -> bool:
 
 
 def in_range_3d(
-    value_3d: np.ndarray,
-    range_value_3d: tuple[float, float, float],
+    p_1: np.ndarray,
+    p_2: tuple[float, float, float] | np.ndarray,
     distance: int,
 ) -> bool | np.bool_:
-    is_in_range = True
+    """Return True if two points are within manhattan distance of eachother."""
     for i in range(3):
-        is_in_range = is_in_range and in_range(value_3d[i], range_value_3d[i], distance)
+        if not in_range(p_1[i], p_2[i], distance):
+            return False
 
-    return is_in_range
+    return False
 
 
 def generate_cut_list(
@@ -46,9 +47,7 @@ def generate_cut_list(
 
     logger.debug("Generating cutlist -> voxelDomainSize: %s", voxel_domain_size)
 
-    for o in radius_tangent_voxel_list:
-        pos = o[1]
-
+    for _, pos, _ in radius_tangent_voxel_list:
         logger.debug("Generating cutlist -> centerline point: %s", pos)
 
         for j in range(3):
@@ -101,6 +100,7 @@ def parse_arguments() -> Arguments:
 
 
 if __name__ == "__main__":
+    # Setup
     args = parse_arguments()
     DEBUG_MODE = args.debug
     SI_FACTOR = args.si_factor
@@ -130,8 +130,7 @@ if __name__ == "__main__":
 
     target_elem = int(conf_data["target_elements"])
 
-    voxel_stent_final = np.zeros(0)
-
+    # Voxelizing stl
     start_time = time.time()
 
     logger.info("Voxelizing vessel geometry")
@@ -159,20 +158,22 @@ if __name__ == "__main__":
     DX = (1.0 / sx) * SI_FACTOR
     logger.info("dx [m]: %s", DX)
 
+    # Reading centerlines.
     logger.info("Extracting information on openings from centerline")
     radius_tangent_list = get_openings_from_center_line(center_line_file)
     logger.info("Scale: %s", scale)
     logger.info("Translate: %s", shift)
     radius_tangent_voxel_list = convert_to_voxelspace(
         radius_tangent_list,
-        domain_data[0],
-        domain_data[1],
+        scale,
+        shift,
     )
 
     cut_list = generate_cut_list(domain, radius_tangent_voxel_list, distance)
 
     logger.info("Computed list of sides to cut away for openings: %s", cut_list)
 
+    # Creating walls.
     logger.info("Creating walls and opening in/outlets")
     start = time.time()
     vol_with_walls, _ = create_walls(voxel_vol, cut_list, cut_width)
@@ -191,9 +192,10 @@ if __name__ == "__main__":
     logger.info("Fluid ratio: %s", fluids / volume)
     logger.info("Walls: %s", np.count_nonzero(vol_with_walls == 1))
 
+    # Painting openings.
     logger.info("Detecting and assigning voxel openings")
     start = time.time()
-    opening_ids, opening_centers, Inlets_outlets_voxles, painted_openings = (
+    opening_ids, opening_centers, inlets_outlets_voxels, vol_painted = (
         detect_openings(vol_with_walls)
     )
     end = time.time()
@@ -215,30 +217,33 @@ if __name__ == "__main__":
     opening_index = []
     opening_radius = []
     opening_normalized_qratio = []
-    opening_center = []
-    opening_tangent = []
+    opening_centers = []
+    opening_tangents = []
 
     # Radial ratio of outlets, note: Qinlet = 1, so it is not included
     r3_tot = np.sum([x[0] ** 3 for x in radius_tangent_voxel_list[1:]])
 
-    for cc_vox in range(len(opening_centers)):
-        for cc_cl in range(len(radius_tangent_voxel_list)):
-            c_vox = opening_centers[cc_vox]
-            r_cl = radius_tangent_voxel_list[cc_cl]
-            c_cl = r_cl[1]
+    for opening_i in range(len(opening_centers)):
+        for radius, cl_endpoint, cl_tangent in radius_tangent_voxel_list:
+            opening_center = opening_centers[opening_i]
 
-            if in_range_3d(c_vox, (c_cl[0], c_cl[1], c_cl[2]), distance) is True:
-                opening_index.append(opening_ids[cc_vox])
-                opening_radius.append(r_cl[0] * SI_FACTOR)
+            if in_range_3d(opening_center, cl_endpoint, distance) is True:
+                opening_index.append(opening_ids[opening_i])
+                opening_radius.append(radius * SI_FACTOR)
                 opening_normalized_qratio.append(
-                    r_cl[0] ** 3 / r3_tot,
-                )  # TODO: it also assigns a number to the inlet, disredards that
-                opening_center.append(c_vox)
-                opening_tangent.append(np.array((r_cl[2][0], r_cl[2][1], r_cl[2][2])))
+                    radius ** 3 / r3_tot,
+                )
+                # TODO: it also assigns a number to the inlet, disredards that
+                # TODO: Understand the previous todo.
+                opening_centers.append(opening_center)
+                opening_tangents.append(np.array(cl_tangent))
+            else:
+                e = "Opening and centerline do not match"
+                raise ValueError(e)
 
     if DEBUG_MODE:
         logger.debug("Saving nrrd geometry flag")
-        nrrd.write(output_base_name + "geometry.nrrd", painted_openings)
+        nrrd.write(output_base_name + "geometry.nrrd", vol_painted)
         if len(opening_index) != len(opening_centers):
             logger.debug(
                 "Number of matched openings is incorrect: %s instead of %s",
@@ -258,23 +263,22 @@ if __name__ == "__main__":
             np.double,
             copy=False,
         ),
-        openingCenter=np.array(opening_center).astype(np.double, copy=False),
-        openingTangent=np.array(opening_tangent).astype(np.double, copy=False),
-        stent=voxel_stent_final.astype(np.short, copy=False),
-        Nx=painted_openings.shape[0],
-        Ny=painted_openings.shape[1],
-        Nz=painted_openings.shape[2],
+        openingCenter=np.array(opening_centers).astype(np.double, copy=False),
+        openingTangent=np.array(opening_tangents).astype(np.double, copy=False),
+        Nx=vol_painted.shape[0],
+        Ny=vol_painted.shape[1],
+        Nz=vol_painted.shape[2],
     )
 
-    logger.info("Maximum geometry flag: %s", painted_openings.max())
+    logger.info("Maximum geometry flag: %s", vol_painted.max())
 
     # Create an HDF5 file to save the geometry flag seperately
     with h5py.File(output_base_name + "gf.h5", "w") as f:
         # Create a dataset in the file and store the array
         dset = f.create_dataset(
             "geometryFlag",
-            shape=painted_openings.flatten().shape,
-            data=painted_openings.flatten().astype(np.int8),
+            shape=vol_painted.flatten().shape,
+            data=vol_painted.flatten().astype(np.int8),
             dtype=np.int8,
             compression="gzip",
             compression_opts=9,

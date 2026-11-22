@@ -31,15 +31,19 @@ def normalize(v: np.ndarray) -> np.ndarray:
 def get_openings_from_center_line(
     file_path: Path,
 ) -> list[tuple[float, np.ndarray, np.ndarray]]:
-    """
+    """Retrieve all opening from the centerline file.
+
     Parameters
     ----------
-    file_name: Path
+    file_path: Path
         Name of the centerline file (VTP).
 
     Returns
     -------
-    We'll see. But we assume all centerline runs from source (inlet) to target.
+    A list of tuples with:
+        The radius at the opening.
+        The center position of the opening.
+        The tangent of the opening.
 
     """
     reader = vtk.vtkXMLPolyDataReader()

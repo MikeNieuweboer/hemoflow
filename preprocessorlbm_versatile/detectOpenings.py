@@ -1,3 +1,4 @@
+from itertools import product
 import sys
 import time
 from collections.abc import Generator
@@ -60,16 +61,17 @@ def get_neighbouring_unused_voxel_plane(
         or data[z + 1][x][y] == VoxelType.UNUSED_VOXEL
     ):
         return "z"
-    elif (
+    if (
         data[z][x - 1][y] == VoxelType.UNUSED_VOXEL
         or data[z][x + 1][y] == VoxelType.UNUSED_VOXEL
     ):
         return "x"
-    elif (
+    if (
         data[z][x][y - 1] == VoxelType.UNUSED_VOXEL
         or data[z][x][y + 1] == VoxelType.UNUSED_VOXEL
     ):
         return "y"
+    return None
 
 
 def find_inlet_outlet(
@@ -80,8 +82,7 @@ def find_inlet_outlet(
     plane: Literal["x", "y", "z"] | None,
 ) -> list[tuple[int, int, int]] | None:
     """Create a list of voxels (x, y, z) that make up the inlet/outlet for a voxel."""
-    inlet_outlet = []
-    inlet_outlet += recur_find_inlet_outlet(x, y, z, None, None, None, [], data, plane)
+    inlet_outlet = recur_find_inlet_outlet(x, y, z, None, None, None, [], data, plane)
 
     if len(inlet_outlet) > 1:
         print(" -> Found opening of size:", len(inlet_outlet))
@@ -91,11 +92,13 @@ def find_inlet_outlet(
 
 
 def show_progress(progress: int, total: int) -> None:
+    """Manual tqdm?."""
     sys.stdout.flush()
     sys.stdout.write(
-        "\r[{0}] {1:.2f}%".format(
-            "#" * int((progress * 10) / total), (progress * 100.0) / total
-        )
+        "\r[{}] {:.2f}%".format(
+            "#" * int((progress * 10) / total),
+            (progress * 100.0) / total,
+        ),
     )
     sys.stdout.flush()
 
@@ -106,10 +109,7 @@ def voxel_is_not_yet_processed(
     z: int | np.integer,
     inlets_outlets: list[list[tuple[int, int, int]]],
 ) -> bool:
-    for l in inlets_outlets:
-        if (x, y, z) in l:
-            return False
-    return True
+    return all((x, y, z) not in l for l in inlets_outlets)
 
 
 def recur_find_inlet_outlet(
@@ -126,58 +126,42 @@ def recur_find_inlet_outlet(
     """Find the cells on a slice along a given plane which are inlet or outlet."""
     result.append((x, y, z))
 
-    dz_list = [-1, 0, 1]
-    if plane == "z":
-        dz_list = [0]
+    # Only traverse parallel to plane
+    dz_list = [0] if plane == "z" else [-1, 0, 1]
+    dx_list = [0] if plane == "x" else [-1, 0, 1]
+    dy_list = [0] if plane == "y" else [-1, 0, 1]
 
-    dx_list = [-1, 0, 1]
-    if plane == "x":
-        dx_list = [0]
-
-    dy_list = [-1, 0, 1]
-    if plane == "y":
-        dy_list = [0]
-
-    for dz in dz_list:
-        for dx in dx_list:
-            for dy in dy_list:
-                if (dx, dy, dz) == (0, 0, 0):
-                    continue
-                x_n = x + dx
-                y_n = y + dy
-                z_n = z + dz
-                if (
-                    (x_n, y_n, z_n) != (prev_x, prev_y, prev_z)
-                    and data[z_n][x_n][y_n] == VoxelType.FLUID_VOXEL
-                    and has_neighboring_unused_voxel(x_n, y_n, z_n, data)
-                    and (x_n, y_n, z_n) not in result
-                ):
-                    result = recur_find_inlet_outlet(
-                        x_n,
-                        y_n,
-                        z_n,
-                        x,
-                        y,
-                        z,
-                        result,
-                        data,
-                        plane,
-                    )
+    for dz, dx, dy in product(dz_list, dx_list, dy_list):
+        if (dx, dy, dz) == (0, 0, 0):
+            continue
+        x_n = x + dx
+        y_n = y + dy
+        z_n = z + dz
+        if (
+            (x_n, y_n, z_n) != (prev_x, prev_y, prev_z)
+            and data[z_n][x_n][y_n] == VoxelType.FLUID_VOXEL
+            and has_neighboring_unused_voxel(x_n, y_n, z_n, data)
+            and (x_n, y_n, z_n) not in result
+        ):
+            result = recur_find_inlet_outlet(
+                x_n,
+                y_n,
+                z_n,
+                x,
+                y,
+                z,
+                result,
+                data,
+                plane,
+            )
     return result
-
-
-def find_openings(
-    fluid_voxel: tuple[int, int, int],
-    data: np.ndarray,
-) -> list[tuple[int, int, int]] | None:
-    z, x, y = fluid_voxel
-    plane = get_neighbouring_unused_voxel_plane(x, y, z, data)
-    return find_inlet_outlet(x, y, z, data, plane)
 
 
 def detect_inlets_outlets(
     data: np.ndarray,
-) -> tuple[list[int], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray]:
+) -> tuple[
+    list[VoxelType], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray
+]:
     """Detect all inlets and outlets of the vessel model.
 
     Assumes the following:
@@ -232,7 +216,7 @@ def detect_inlets_outlets(
 
     #         inlets_outlets.append(np.transpose(inlet_outlet))
 
-    ############################ Method 2: Iterate through all surface voxels (slow) ############################
+    ############# Method 2: Iterate through all surface voxels (slow) ##################
     # Note: Only work if all openings are parallel to normal planes.
     # Drawbacks: Very slow, large memory consumption
 
@@ -257,22 +241,43 @@ def detect_inlets_outlets(
 
 def paint_inlets_outlets(
     inlets_outlets: list[list[tuple[int, int, int]]],
-    data: np.ndarray,
-) -> tuple[list[int], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray]:
-    """Determines the inlet by picking the inlet/outlet with the greatest area
-    Then paints the inlet with the value 6 and the outlets with 7
-    """
+    voxel_volume: np.ndarray,
+) -> tuple[
+    list[VoxelType], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray
+]:
+    """Paint the inlets and outlets with their voxeltype.
 
-    opening_idx = []  # Label identifying this opening
-    opening_center = []
+    Uses the hardcoded ordering in the total surface of the inlets
+    and outlets to paint the types in a copy of the voxel volume.
+
+    Hardcoded inlets and outlets
+    outlet 0/1: RPA side branches
+    inlet 2: LHV
+    inlet 3: MHV
+    inlet 4: RHV
+    outlet 5: LPA
+    inlet 6: SVC
+    inlet 7: IVC
+    outlet 8: RPA
+
+    Returns
+    -------
+    List of voxeltypes in same ordering as in upcoming returns.
+    List of center coordinates of the inlets and outlets.
+    List of groups of reordered inlet and outlet voxel coordinates.
+    Painted voxel volume.
+
+    """
+    opening_id = []  # Label identifying this opening
+    opening_centers = []
     # openingQ = [] # Volume ratio assigned to this opening based on area (TODO: angle or R needed for this one)
 
-    data_result = np.copy(data)
+    painted_voxels = np.copy(voxel_volume)
 
     """ Label the openings based on their area size """
     areas = np.array([len(x) for x in inlets_outlets])
     # Sort the inlets_outlets based on their area size
-    inlets_outlets = [
+    sorted_borders = [
         x for _, x in sorted(zip(list(areas), inlets_outlets, strict=True))
     ]
 
@@ -281,21 +286,6 @@ def paint_inlets_outlets(
     # # for the opening at the domain edge, so we need to remove it.
     # # Note: flawed, use carefully
     # inlets_outlets.pop(0)
-
-    # Hardcoded
-    """
-    inlet 6: SVC
-    inlet 7: IVC
-    inlet 4: RHV
-    inlet 3: MHV
-    inlet 2: LHV
-    """
-
-    """
-    outlet 5: LPA
-    outlet 8: RPA
-    outlet 0/1: RPA side branches
-    """
 
     paint_dic = {
         6: VoxelType.INLET_SVC,
@@ -309,34 +299,31 @@ def paint_inlets_outlets(
         1: VoxelType.OUTLET_SIDE_V,
     }
 
-    print("Number of inlets: ", 5)
-    print("Number of pressure outlets: 0")
-    print("Number of velocity outlet(s): ", 4)
-
-    for i, opening in enumerate(inlets_outlets):
-        opening_c = np.zeros(3)
-        # Find the corresponding paint id
+    for i, opening in enumerate(sorted_borders):
+        # Find the corresponding paint id based on surface ordering.
         paint_id = paint_dic[i]
-        opening_idx.append(paint_id)
+        opening_id.append(paint_id)
 
+        opening_center = np.zeros(3)
         for x, y, z in opening:
-            data_result[z][x][y] = paint_id
-            opening_c += np.array((z, x, y))
+            painted_voxels[z][x][y] = paint_id
+            opening_center += np.array((z, x, y))
 
-        opening_center.append(opening_c / len(opening))
+        opening_centers.append(opening_center / len(opening))
 
-    return (opening_idx, opening_center, inlets_outlets, data_result)
+    return (opening_id, opening_centers, sorted_borders, painted_voxels)
 
 
 def detect_openings(
     input_array: np.ndarray,
-) -> tuple[list[int], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray]:
+) -> tuple[list[VoxelType], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray]:
     sys.setrecursionlimit(10000000)
 
     # Append surrounding layer to avoid boundary checking (THIS SHOULD NOT
     # BE NECESSARY! -> FLUID ON THE EDGE OF THE DOMAIN!) Note that if you use
     # Method 1 to detect opening voxels, you can not append surrounding layers,
     # just comment the following line out.
+    # TODO: Function seems incorrect due to overwriting of padding.
     data = np.pad(input_array, 1, "constant", constant_values=(VoxelType.UNUSED_VOXEL,))
     data = input_array
 
@@ -367,7 +354,7 @@ if __name__ == "__main__":
     data, data_header = nrrd.read(sys.argv[1])
 
     # TODO: This does not match the function description.
-    openingDescr, result = detect_openings(data)
+    opening_descr, result = detect_openings(data)
 
     # Write result without the surrounding layer
     nrrd.write(sys.argv[2], result)
