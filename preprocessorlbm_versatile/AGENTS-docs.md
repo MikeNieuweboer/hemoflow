@@ -31,6 +31,7 @@ Function signatures use concrete lists/tuples for geometry and opening data, exp
 | `createFluidSolid.py` | Zero-padded neighbor shifts expand the fluid mask into wall cells, trim empty bounds, and cut chosen domain faces. Returns int8 geometry plus crop bounds; imports multiprocessing but the wall calculation is serial. |
 | `detectOpenings.py` | Active method scans surface voxels and recursively groups plane-aligned openings; connected-component code is commented out. `paint_dic` maps discovery order to named inlet/outlet labels. `detectOpenings()` currently discards its padded copy and slices one layer off the final result; check dimensions/centers when changing padding. |
 | `constants.py` | Unused/wall/fluid labels 0/1/2, inlets 10–14, outlets 15–18. Must match root `globals.h`; old README flag tables do not apply. |
+| `view_nrrd.py` | Standalone debug NRRD viewer using NumPy, pynrrd, PyVista (VTK), and `constants.VoxelType`. Thresholds cell labels and extracts exposed voxel cube faces (no contour interpolation) in voxel coordinates with stable colors, visibility checkboxes, opacity sliders, and optional screenshots/off-screen rendering. |
 | `README.md` | Inherited usage/geometry notes; single-inlet assumptions and flag table are stale for this variant. |
 | `run.sh` | Obsolete multi-positional-argument example; does not match `main.py`'s single JSON-config argument. |
 | `test.py` | Manual comparison of opening tangents from absolute-path external NPZ files, with commented mutation examples; no assertions or portable test fixture. |

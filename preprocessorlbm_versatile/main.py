@@ -1,3 +1,4 @@
+from constants import VoxelType
 import argparse
 import json
 import logging
@@ -141,6 +142,14 @@ if __name__ == "__main__":
         scale,
         shift,
     )
+    temp = voxel_vol.copy()
+    for _, pos, _ in radius_tangent_voxel_list:
+        pos = np.round(pos, decimals=0).astype(np.int32)
+        temp[pos[0], pos[1], [pos[2]]] = VoxelType.INLET_SVC
+
+    if DEBUG_MODE:
+        logger.debug("Saving voxelization result")
+        nrrd.write(str(work_dir / (output_base_name + "fluid_only.nrrd")), temp)
 
     cut_list = generate_cut_list(domain, radius_tangent_voxel_list, distance)
 

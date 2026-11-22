@@ -46,7 +46,34 @@ Cutlist meaning -> cut one layer from the planes:
     # 2,3 => Ymin, Ymax
     # 4,5 => Zmin, Zmax
 
-### Dependencies
+### Interactive NRRD viewer
+
+View any of the `fluid_only.nrrd`, `wall_fluid.nrrd`, or `geometry.nrrd`
+files written by `main.py --debug`:
+
+```bash
+python -m pip install numpy pynrrd pyvista
+python view_nrrd.py /path/to/vessel_geometry.nrrd
+```
+
+Each voxel type from `constants.py` has a stable color and a named legend entry.
+Use the bottom-left checkboxes to show/hide types and the adjacent sliders to
+adjust opacity. Unused voxels start hidden; walls start translucent. Unknown
+labels appear in white with their numeric identifier. Drag to rotate, scroll to
+zoom, and Shift-drag to pan.
+
+The surfaces consist of exposed, axis-aligned voxel cube faces, without
+interpolation or smoothing. Internal faces between voxels of the same type are
+omitted. Coordinates are voxel indices, not millimeters:
+`main.py` does not write physical spacing/origin into its debug NRRDs.
+Large volumes (especially the unused-region surface) can take time and memory
+to load.
+
+Use `--screenshot view.png` to save the final view, or
+`--off-screen --screenshot view.png` to render without opening a window.
+Off-screen rendering still requires a working VTK rendering backend.
+
+### Preprocessor dependencies
 
 Tested with Anaconda and Python 3.7
 
