@@ -1,4 +1,3 @@
-import functools
 import multiprocessing
 import time
 from collections.abc import Generator
@@ -16,6 +15,34 @@ from slice import (
     to_intersecting_lines,
 )
 from util import remove_dups_from_point_list
+
+_worker_mesh: list[Triangle] | None = None
+_worker_domain: list[int] | None = None
+_worker_is_shell = False
+
+
+def _init_worker(
+    mesh: list[Triangle],
+    domain: list[int],
+    is_shell: bool,
+) -> None:
+    """Keep inherited geometry in each worker instead of sending it per task."""
+    global _worker_mesh, _worker_domain, _worker_is_shell  # noqa: PLW0603
+    _worker_mesh = mesh
+    _worker_domain = domain
+    _worker_is_shell = is_shell
+
+
+def _render_height(height: int) -> np.ndarray:
+    """Render a slice using the geometry installed by the pool initializer."""
+    if _worker_mesh is None or _worker_domain is None:
+        raise RuntimeError("Voxelization worker has not been initialized")
+    return render_slice(
+        height,
+        mesh=_worker_mesh,
+        domain=_worker_domain,
+        is_mesh_a_shell=_worker_is_shell,
+    )
 
 
 def voxelize(
@@ -69,7 +96,8 @@ def voxelize(
 
     Notes
     -----
-    Slices are processed by 16 workers using the fork start method. Interior
+    Slices are processed by 16 workers using a local fork context. Geometry is
+    inherited once per worker; only slice heights are sent as tasks. Interior
     filling assumes slice contours support outside-to-inside crossing parity;
     open contours are not automatically capped or repaired.
 
@@ -98,21 +126,20 @@ def voxelize(
     start = time.time()
 
     # Parallel
-    multiprocessing.set_start_method("fork")
-    with multiprocessing.Pool(16) as p:
+    ctx = multiprocessing.get_context("fork")
+    with ctx.Pool(
+        16,
+        initializer=_init_worker,
+        initargs=(mesh, domain, is_mesh_a_shell),
+    ) as p:
         # Voxelize each layer in z-direction.
         vol = np.array(
             p.map(
-                functools.partial(
-                    render_slice,
-                    mesh=mesh,
-                    domain=domain,
-                    is_mesh_a_shell=is_mesh_a_shell,
-                ),
+                _render_height,
                 range(int(domain[2])),
-            ), dtype=np.int8,
+            ),
+            dtype=np.int8,
         )
-
 
     end = time.time()
     print(f"Voxelization time: {end - start}")
