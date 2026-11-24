@@ -32,24 +32,3 @@ def array_to_white_greyscale_pixel(
             else:
                 pixels[i, j] = 0
 
-
-def pad_voxel_array(voxels: np.ndarray) -> np.ndarray:
-    """Add a padding layer around each edge of the domain.
-
-    Parameters
-    ----------
-    voxels: np.ndarray
-        A 3-Dimensional numpy array.
-
-    Returns
-    -------
-    A copy of voxels of size (x_shape + 2, y_shape + 2, z_shape + 2)
-
-    """
-    shape = voxels.shape
-    new_shape = (shape[0] + 2, shape[1] + 2, shape[2] + 2)
-    vol = np.zeros(new_shape, dtype=np.int8)
-
-    vol[1:-1, 1:-1, 1:-1] = voxels
-
-    return vol

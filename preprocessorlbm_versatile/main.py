@@ -1,4 +1,3 @@
-from constants import VoxelType
 import argparse
 import json
 import logging
@@ -18,47 +17,43 @@ from voxelizeStl import voxelize
 logger = logging.getLogger(__name__)
 
 
-def in_range(x: float, y: float, distance: float) -> bool:
-    """Check whether x and y are at most distance away from eachother."""
-    return np.abs(y - x) < distance
-
-
 def in_range_3d(
     p_1: np.ndarray,
     p_2: tuple[float, float, float] | np.ndarray,
-    distance: int,
+    distance: float | np.ndarray,
 ) -> bool | np.bool_:
     """Return True if two points are within manhattan distance of eachother."""
-    for i in range(3):
-        if not in_range(p_1[i], p_2[i], distance):
-            return False
-
-    return False
+    if isinstance(distance, np.ndarray):
+        return all(np.abs(p_1[i] - p_2[i]) < distance[i] for i in range(3))
+    return all(np.abs(p_1[i] - p_2[i]) < distance for i in range(3))
 
 
 def generate_cut_list(
-    voxel_domain_size: list[int],
-    radius_tangent_voxel_list: list[tuple[float, np.ndarray, np.ndarray]],
-    distance: int = 4,
+    bounding_box: list[list[float]],
+    radius_tangent_list: list[tuple[float, np.ndarray, np.ndarray]],
 ) -> np.ndarray:
-    sides_to_cut = np.zeros(6)
+    """Select faces within an endpoint radius using Manhattan distance.
 
-    # If centerline point is within this distance of the boundary it is
-    # considered an opening Cutting away unused layers might influence this
-    # distance.
+    Bounds are [mins, maxs]; bounds, endpoints, and radii use geometry units.
+    Face indices are x-min, x-max, y-min, y-max, z-min, z-max.
+    """
+    sides_to_cut = np.zeros(6, dtype=bool)
+    bounds = np.asarray(bounding_box)
 
-    logger.debug("Generating cutlist -> voxelDomainSize: %s", voxel_domain_size)
+    logger.debug("Generating cutlist -> bounding box: %s", bounding_box)
 
-    for _, pos, _ in radius_tangent_voxel_list:
+    for radius, pos, _ in radius_tangent_list:
         logger.debug("Generating cutlist -> centerline point: %s", pos)
 
-        for j in range(3):
-            if in_range(pos[j], 0, distance):
-                sides_to_cut[j * 2] = 1
-            if in_range(pos[j], voxel_domain_size[j], distance):
-                sides_to_cut[j * 2 + 1] = 1
+        for axis in range(3):
+            for side in range(2):
+                closest_point = np.clip(pos, bounds[0], bounds[1])
+                closest_point[axis] = bounds[side, axis]
+                distance = np.abs(pos - closest_point).sum()
+                if distance <= radius:
+                    sides_to_cut[axis * 2 + side] = True
 
-    return np.where(sides_to_cut == 1)[0]
+    return np.flatnonzero(sides_to_cut)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -94,7 +89,6 @@ if __name__ == "__main__":
 
     SI_FACTOR = float(conf_data["si_factor"])
     cut_width = int(conf_data["cut_width"])
-    distance = int(conf_data["distance"])
 
     root_dir = Path(git.Repo(".", search_parent_directories=True).git_dir).parent
     work_dir = root_dir / conf_data["geometry_dir"]
@@ -111,6 +105,7 @@ if __name__ == "__main__":
 
     logger.info("Voxelizing vessel geometry")
     voxel_vol, domain_data = voxelize(geometry_path, target_elem)
+    print(type(voxel_vol))
 
     if DEBUG_MODE:
         logger.debug("Saving voxelization result")
@@ -118,13 +113,11 @@ if __name__ == "__main__":
 
     scale = domain_data[0]
     shift = domain_data[1]
-    domain = domain_data[2]
-    bounding_box = domain_data[3]
+    bounding_box = domain_data[2]
     sx, sy, sz = scale
     tx, ty, tz = shift
 
     logger.info("Voxelized domain size: %s", voxel_vol.shape)
-    logger.info("Domain: %s", domain)
     logger.info("Bounding box: %s", bounding_box)
     logger.info("Transformation matrix from voxelization:")
     logger.info("Translate: %s %s %s", tz, tx, ty)
@@ -134,6 +127,7 @@ if __name__ == "__main__":
     DX = (1.0 / sx) * SI_FACTOR
     logger.info("dx [m]: %s", DX)
 
+    # TODO: Fix incorrect shift in centerlines due to padding and ob1.
     # Reading centerlines.
     logger.info("Extracting information on openings from centerline")
     radius_tangent_list = get_openings_from_center_line(center_line_file)
@@ -142,16 +136,8 @@ if __name__ == "__main__":
         scale,
         shift,
     )
-    temp = voxel_vol.copy()
-    for _, pos, _ in radius_tangent_voxel_list:
-        pos = np.round(pos, decimals=0).astype(np.int32)
-        temp[pos[0], pos[1], [pos[2]]] = VoxelType.INLET_SVC
 
-    if DEBUG_MODE:
-        logger.debug("Saving voxelization result")
-        nrrd.write(str(work_dir / (output_base_name + "fluid_only.nrrd")), temp)
-
-    cut_list = generate_cut_list(domain, radius_tangent_voxel_list, distance)
+    cut_list = generate_cut_list(bounding_box, radius_tangent_list)
 
     logger.info("Computed list of sides to cut away for openings: %s", cut_list)
 
@@ -179,11 +165,18 @@ if __name__ == "__main__":
     # Painting openings.
     logger.info("Detecting and assigning voxel openings")
     start = time.time()
-    opening_ids, opening_centers, inlets_outlets_voxels, vol_painted = detect_openings(
-        vol_with_walls
+    opening_ids, opening_centers, vol_painted = detect_openings(
+        vol_with_walls,
     )
     end = time.time()
     logger.info("Detecting opening time: %s", end - start)
+
+    if DEBUG_MODE:
+        logger.debug("Saving nrrd painted geometry")
+        nrrd.write(
+            str(work_dir / (output_base_name + "vol_painted.nrrd")),
+            vol_painted,
+        )
 
     # TODO: Assign tangents and radii to voxelized openings
 
@@ -198,10 +191,8 @@ if __name__ == "__main__":
 
     # The combined information about openings in the correct order
     # (Inlet, Pressure outlet, Other velocity outlets)
-    opening_index = []
     opening_radius = []
     opening_normalized_qratio = []
-    opening_centers = []
     opening_tangents = []
 
     # Radial ratio of outlets, note: Qinlet = 1, so it is not included
@@ -211,29 +202,24 @@ if __name__ == "__main__":
         for radius, cl_endpoint, cl_tangent in radius_tangent_voxel_list:
             opening_center = opening_centers[opening_i]
 
-            if in_range_3d(opening_center, cl_endpoint, distance) is True:
-                opening_index.append(opening_ids[opening_i])
+            if (
+                in_range_3d(opening_center, cl_endpoint, np.array(scale) * radius)
+                is True
+            ):
                 opening_radius.append(radius * SI_FACTOR)
                 opening_normalized_qratio.append(
                     radius**3 / r3_tot,
                 )
-                # TODO: it also assigns a number to the inlet, disredards that
+                # TODO: it also assigns a number to the inlet, disregard that
                 # TODO: Understand the previous todo.
-                opening_centers.append(opening_center)
                 opening_tangents.append(np.array(cl_tangent))
-            else:
-                e = "Opening and centerline do not match"
-                raise ValueError(e)
 
-    if DEBUG_MODE:
-        logger.debug("Saving nrrd geometry flag")
-        nrrd.write(str(work_dir / (output_base_name + "geometry.nrrd")), vol_painted)
-        if len(opening_index) != len(opening_centers):
-            logger.debug(
-                "Number of matched openings is incorrect: %s instead of %s",
-                len(opening_index),
-                len(opening_centers),
-            )
+    if len(opening_ids) != len(opening_centers):
+        logger.debug(
+            "Number of matched openings is incorrect: %s instead of %s",
+            len(opening_ids),
+            len(opening_centers),
+        )
 
     logger.info("Saving final output")
     logger.info("File: %s", work_dir / (output_base_name + "ops.npz"))
@@ -241,7 +227,7 @@ if __name__ == "__main__":
     np.savez_compressed(
         work_dir / (output_base_name + "ops.npz"),
         dx=np.array([DX]).astype(np.double, copy=False),
-        openingIndex=np.array(opening_index).astype(np.int8, copy=False),
+        openingIndex=np.array(opening_ids).astype(np.int8, copy=False),
         openingRadius=np.array(opening_radius).astype(np.double, copy=False),
         openingNormalizedQRatio=np.array(opening_normalized_qratio).astype(
             np.double,

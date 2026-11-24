@@ -17,7 +17,9 @@ Short description:
     wall and fluidx cells to nrrd.
 
 """
+
 import time
+from itertools import product
 
 import numpy as np
 
@@ -121,21 +123,25 @@ def create_walls(
     cut_list: list[int] | np.ndarray,
     cut_width: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
-    all_voxels = np.copy(fluid_voxels)
 
     print("Calculating boundary...")
-
     start = time.time()
+
+    fluid_voxels = np.pad(
+        fluid_voxels,
+        1,
+        "constant",
+        constant_values=(VoxelType.UNUSED_VOXEL,),
+    )
+    all_voxels = np.zeros_like(fluid_voxels)
 
     # Serial
     # Circular bool shift to paint walls
-    for l in range(-1, 2):
-        a = roll_zeropad(fluid_voxels, l, 0)
-        for m in range(-1, 2):
-            b = roll_zeropad(a, m, 1)
-            for n in range(-1, 2):
-                c = roll_zeropad(b, n, 2)
-                all_voxels = all_voxels | c
+    for x_shift, y_shift, z_shift in product(range(-1, 2), range(-1, 2), range(-1, 2)):
+        shifted_fluid = np.roll(
+            fluid_voxels, (z_shift, x_shift, y_shift), axis=(0, 1, 2)
+        )
+        all_voxels = all_voxels | shifted_fluid
 
     end = time.time()
     print(f"roll_zeropad time: {end - start}")

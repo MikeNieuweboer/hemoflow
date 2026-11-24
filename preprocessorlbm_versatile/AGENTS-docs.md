@@ -9,7 +9,7 @@ Run from the repository root: `python preprocessorlbm_versatile/main.py /path/to
 1. `main.py` reads JSON; `geometry_dir` locates STL/VTP inputs and resolves the output prefix. Required keys and units are documented in [AGENTS.md](../AGENTS.md).
    The CLI accepts only the config path and `--debug`; JSON options `si_factor`, `cut_width`, and `distance` default to `0.001`, `1`, and `4`, respectively.
 2. `voxelizeStl.py` uses numpy-stl → `slice.py` triangle intersections → `perimeter.py` rasterization; `util.py` pads the result. Internal slice order is rearranged to `(x,y,z)` before return.
-3. `readCL.py` uses VTK to extract endpoint radii, centers, and tangents, then converts positions to voxel space. `main.py` derives boundary cuts and calls `createFluidSolid.py` to paint walls/fluid.
+3. `readCL.py` uses VTK to extract endpoint radii, centers, and tangents, then converts positions to voxel space. `main.py::generate_cut_list` selects bounding-box faces whose Manhattan distance from any endpoint is at most that endpoint's radius, using the original geometry coordinates rather than a fixed voxel distance. Face indices are x-min, x-max, y-min, y-max, z-min, z-max. `main.py` then calls `createFluidSolid.py` to paint walls/fluid.
 4. `detectOpenings.py` groups and paints openings using `constants.py`; `main.py` matches centers to centerline endpoints, then saves metadata and geometry separately.
 5. The root solver reads `*ops.npz` and `*gf.h5`. Label changes also affect root `globals.h`, `hemoFlow.cpp`, and `opening.cpp`.
 
@@ -23,7 +23,7 @@ Function signatures use concrete lists/tuples for geometry and opening data, exp
 | --- | --- |
 | `config.template.json` | Copyable JSON configuration template containing required input/output fields and optional preprocessing settings with their defaults. |
 | `main.py` | Pipeline/JSON entrypoint. Writes `output_base_name + "ops.npz"` with opening arrays, `dx`, dimensions, and an empty `stent` array; writes `output_base_name + "gf.h5"` with gzip-compressed flattened int8 `geometryFlag`. Stent paths are parsed but no stent voxelization runs here. |
-| `voxelizeStl.py` | STL loading, scale/shift, slice rendering, padding, and axis swaps. Explicitly sets multiprocessing to `fork` inside `voxelize()` and uses 16 workers; repeated calls in one process can fail when resetting the start method. |
+| `voxelizeStl.py` | STL loading, scale/shift, slice rendering, padding, and axis swaps. Uses 16 workers with a local `fork` context and an initializer that stores inherited geometry per worker; tasks send only slice heights, avoiding repeated mesh serialization and allowing repeated calls without resetting the global start method. |
 | `slice.py` | Triangle/plane intersections, interpolation, bounding-box-based target resolution, transforms, and axis swaps. Imports `perimeter.py` and distance/deduplication helpers from `util.py`. |
 | `perimeter.py` | Converts slice line segments to filled or shell voxel planes; line selection/intersection helpers. NumPy-based, called by the voxelizer. |
 | `util.py` | Array padding, point deduplication, Manhattan distance, and array/pixel inspection helpers used by voxelization/slicing. |

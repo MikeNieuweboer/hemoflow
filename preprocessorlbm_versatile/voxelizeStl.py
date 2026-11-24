@@ -15,7 +15,7 @@ from slice import (
     swap_axis,
     to_intersecting_lines,
 )
-from util import pad_voxel_array, remove_dups_from_point_list
+from util import remove_dups_from_point_list
 
 
 def voxelize(
@@ -36,7 +36,6 @@ def voxelize(
     tuple[
         list[float],
         list[float],
-        list[int],
         list[list[float]],
     ],
 ]:
@@ -52,6 +51,8 @@ def voxelize(
     domain_data : tuple, optional
         Existing (scale, shift, domain, bounding_box) to use instead of
         calculating a new voxel coordinate system.
+        Note: be carful with custom domain_data, as it may lead to difficulty
+            indexing in the voxelized domain.
     rotation : int
         Swap x/y before slicing for 0, or y/z for 1; other values leave the
         slicing axes unchanged. The swaps are undone before returning.
@@ -62,8 +63,7 @@ def voxelize(
     -------
     tuple
         An int8 occupancy array in (x, y, z) order and the metadata tuple
-        (scale, shift, domain, bounding_box). Occupied voxels are 1. The output
-        voxel domain is padded with one layer of zeros on every face.
+        (scale, shift, domain, bounding_box). Occupied voxels are 1.
         The metadata domain records the padded shape before the final axis
         swaps, rather than necessarily matching the returned array's shape.
 
@@ -99,24 +99,10 @@ def voxelize(
 
     # Parallel
     multiprocessing.set_start_method("fork")
-    pool = multiprocessing.Pool(16)
-
-    # Voxelize each layer in z-direction.
-    # vol = np.array(
-    #     pool.map(
-    #         functools.partial(
-    #             render_slice,
-    #             mesh=mesh,
-    #             domain=domain,
-    #             is_mesh_a_shell=is_mesh_a_shell,
-    #         ),
-    #         range(int(domain[2])),
-    #     ),
-    # )
-
-    vol = np.array(
-        list(
-            map(
+    with multiprocessing.Pool(16) as p:
+        # Voxelize each layer in z-direction.
+        vol = np.array(
+            p.map(
                 functools.partial(
                     render_slice,
                     mesh=mesh,
@@ -124,14 +110,9 @@ def voxelize(
                     is_mesh_a_shell=is_mesh_a_shell,
                 ),
                 range(int(domain[2])),
-            ),
-        ),
-    )
+            ), dtype=np.int8,
+        )
 
-    pool.close()
-
-    vol = pad_voxel_array(vol)
-    domain = list(vol.shape)
 
     end = time.time()
     print(f"Voxelization time: {end - start}")
@@ -146,7 +127,7 @@ def voxelize(
     vol = np.swapaxes(vol, 0, 2)
     vol = np.swapaxes(vol, 0, 1)
 
-    return (vol, (scale, shift, domain, bounding_box))
+    return (vol, (scale, shift, bounding_box))
 
 
 def render_slice(

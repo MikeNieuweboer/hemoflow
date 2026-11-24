@@ -160,7 +160,9 @@ def recur_find_inlet_outlet(
 def detect_inlets_outlets(
     data: np.ndarray,
 ) -> tuple[
-    list[VoxelType], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray
+    list[VoxelType],
+    list[np.ndarray],
+    np.ndarray,
 ]:
     """Detect all inlets and outlets of the vessel model.
 
@@ -243,7 +245,9 @@ def paint_inlets_outlets(
     inlets_outlets: list[list[tuple[int, int, int]]],
     voxel_volume: np.ndarray,
 ) -> tuple[
-    list[VoxelType], list[np.ndarray], list[list[tuple[int, int, int]]], np.ndarray
+    list[VoxelType],
+    list[np.ndarray],
+    np.ndarray,
 ]:
     """Paint the inlets and outlets with their voxeltype.
 
@@ -264,7 +268,6 @@ def paint_inlets_outlets(
     -------
     List of voxeltypes in same ordering as in upcoming returns.
     List of center coordinates of the inlets and outlets.
-    List of groups of reordered inlet and outlet voxel coordinates.
     Painted voxel volume.
 
     """
@@ -299,6 +302,10 @@ def paint_inlets_outlets(
         1: VoxelType.OUTLET_SIDE_V,
     }
 
+    if len(sorted_borders) > len(paint_dic):
+        e = "Found more open border than defined."
+        raise ValueError(e)
+
     for i, opening in enumerate(sorted_borders):
         # Find the corresponding paint id based on surface ordering.
         paint_id = paint_dic[i]
@@ -311,7 +318,7 @@ def paint_inlets_outlets(
 
         opening_centers.append(opening_center / len(opening))
 
-    return (opening_id, opening_centers, sorted_borders, painted_voxels)
+    return (opening_id, opening_centers, painted_voxels)
 
 
 def detect_openings(
@@ -319,7 +326,6 @@ def detect_openings(
 ) -> tuple[
     list[VoxelType],
     list[np.ndarray],
-    list[list[tuple[int, int, int]]],
     np.ndarray,
 ]:
     sys.setrecursionlimit(10000000)
@@ -328,19 +334,22 @@ def detect_openings(
     # BE NECESSARY! -> FLUID ON THE EDGE OF THE DOMAIN!) Note that if you use
     # Method 1 to detect opening voxels, you can not append surrounding layers,
     # just comment the following line out.
-    # TODO: Function seems incorrect due to overwriting of padding.
     data = np.pad(input_array, 1, "constant", constant_values=(VoxelType.UNUSED_VOXEL,))
-    # NOTE: This code was uncommented in the original code; why?
+
+    # NOTE: This code was uncommented, likely for method 1.
     # data = input_array
 
     # Detect openings
-    opening_ids, opening_center, inlets_outlets, result = detect_inlets_outlets(data)
+    opening_ids, opening_center, result = detect_inlets_outlets(data)
+
+    # Take into account the padding added and removed
+    for center in opening_center:
+        center[:] = center - 1
 
     # Return result without outer layer (For Method 2)
     return (
         opening_ids,
         opening_center,
-        inlets_outlets,
         result[1:-1, 1:-1, 1:-1].astype("int8", copy=False),
     )
     # (For Method 1)

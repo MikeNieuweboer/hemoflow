@@ -2,7 +2,6 @@
 
 @author: gzavo
 """
-
 from pathlib import Path
 
 import numpy as np
@@ -60,7 +59,6 @@ def get_openings_from_center_line(
 
     r_tan_data = []
 
-    # TODO: figure out how these lines are represented
     # inlet line ids. Note, only is correct with the current centerline file !!!!!!!!
     # How did I know? Hardcoded...... dumb but useful, need to find a portable way
     # VMTK has some problems with multiple inlets geometry, therefore need to hardcode
@@ -80,9 +78,10 @@ def get_openings_from_center_line(
         r1 = r_array[0]
         r2 = r_array[-1]
 
-        if ll == 0:  # The first inlet!
-            v1 = p_array[0] - p_array[1]
-            r_tan_data.append((r1, p_array[0], -v1))  # The inlet should point inwards
+        # All lines share beginning, only need inlet from first line.
+        if ll == 0:
+            v1 = p_array[1] - p_array[0]
+            r_tan_data.append((r1, p_array[0], v1))  # The inlet should point inwards
 
         # Note, the last 2 points are sometimes the same for some reason
         v2 = p_array[-1] - p_array[-3]
