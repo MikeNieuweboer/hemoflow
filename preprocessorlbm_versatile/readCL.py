@@ -2,10 +2,13 @@
 
 @author: gzavo
 """
+import logging
 from pathlib import Path
 
 import numpy as np
 import vtk
+
+logger = logging.getLogger(__name__)
 
 
 def get_id_list(vtk_id_list: vtk.vtkIdList) -> list[int]:
@@ -45,6 +48,7 @@ def get_openings_from_center_line(
         The tangent of the opening.
 
     """
+    logger.debug("Reading centerline: %s", file_path)
     reader = vtk.vtkXMLPolyDataReader()
     reader.SetFileName(str(file_path))
     reader.Update()
@@ -93,6 +97,7 @@ def get_openings_from_center_line(
         else:
             r_tan_data.append((r2, p_array[-1], v2))
 
+    logger.debug("Extracted %s endpoints from %s centerline cells", len(r_tan_data), n_lines)
     return r_tan_data
 
 

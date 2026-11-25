@@ -18,12 +18,15 @@ Short description:
 
 """
 
+import logging
 import time
 from itertools import product
 
 import numpy as np
 
 from constants import VoxelType
+
+logger = logging.getLogger(__name__)
 
 
 def roll_zeropad(
@@ -91,12 +94,12 @@ def remove_unused_outer_layers(
     A tuple of the sliced data and an array containing how the original data was sliced.
 
     """
-    print("Removing unused outer layers...")
+    logger.debug("Removing unused outer layers")
 
     x, y, z = data.shape
     sliced = np.array([0, x, 0, y, 0, z])
 
-    print("Original bounds:", sliced)
+    logger.debug("Original bounds: %s", sliced)
 
     while np.max(data[sliced[0], :, :]) == 0:
         sliced[0] = sliced[0] + 1
@@ -113,7 +116,7 @@ def remove_unused_outer_layers(
 
     data = data[sliced[0] : sliced[1], sliced[2] : sliced[3], sliced[4] : sliced[5]]
 
-    print("Bounds after removing unused layers:", sliced)
+    logger.debug("Bounds after removing unused layers: %s", sliced)
 
     return data, sliced
 
@@ -124,8 +127,7 @@ def create_walls(
     cut_width: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
 
-    print("Calculating boundary...")
-    start = time.time()
+    logger.debug("Calculating boundary")
 
     fluid_voxels = np.pad(
         fluid_voxels,
@@ -143,9 +145,6 @@ def create_walls(
         )
         all_voxels = all_voxels | shifted_fluid
 
-    end = time.time()
-    print(f"roll_zeropad time: {end - start}")
-
     # cut out fluidx part, so wall remains
     wall_voxels = all_voxels - fluid_voxels
 
@@ -157,10 +156,7 @@ def create_walls(
     wall_voxels[fluid_voxels == 1] = VoxelType.FLUID_VOXEL
 
     # Remove layers with no information
-    start = time.time()
     wall_voxels, sliced = remove_unused_outer_layers(wall_voxels)
-    end = time.time()
-    print(f"removeUnusedOuterLayers time: {end - start}")
 
     # Cutlist meaning:
     # 0,1 => Xmin, Xmax
@@ -186,6 +182,9 @@ def create_walls(
 
 if __name__ == "__main__":
     import sys
+    from logging_setup import configure_logging
+
+    configure_logging()
 
     if len(sys.argv) < 3:
         print(
@@ -196,7 +195,7 @@ if __name__ == "__main__":
 
     import nrrd
 
-    print("Loading data files...")
+    logger.info("Loading data files")
 
     # Lodaing input array
     data1, data_header = nrrd.read(sys.argv[1])
@@ -208,8 +207,8 @@ if __name__ == "__main__":
 
     data2 = create_walls(data1, cutList)
 
-    print("Saving...")
+    logger.info("Saving")
 
     nrrd.write(sys.argv[2], data2)
 
-    print("Done.")
+    logger.info("Done")

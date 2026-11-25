@@ -3,10 +3,10 @@
 ## Usage
 
 ```bash
-python main.py /path/to/input.json [--debug]
+python main.py /path/to/input.json [--debug] [--log-to-file]
 ```
 
-Only the config path and optional `--debug` flag are command-line arguments.
+The config path and optional `--debug` / `--log-to-file` flags are command-line arguments.
 Copy `config.template.json` and fill in your geometry paths and desired settings.
 Set preprocessing parameters in the JSON config:
 
@@ -22,6 +22,33 @@ Set preprocessing parameters in the JSON config:
   "distance": 4
 }
 ```
+
+### Logging
+
+By default, preprocessing logs INFO and higher messages to the console (stderr).
+`--log-to-file` also appends UTF-8 logs to
+`<output_base_name>preprocessing.log` inside `work_dir`: the configured
+`geometry_dir`, resolved relative to the repository root (or an absolute path).
+It does not write beside the config unless that is also the geometry directory.
+Existing logs are preserved; each run adds a timestamped start marker.
+
+```bash
+python main.py /path/to/input.json --log-to-file
+python main.py /path/to/input.json --debug --log-to-file
+```
+
+`--debug` enables DEBUG messages in both destinations and intermediate NRRD
+output. Logs include timestamps, severity, and the originating module.
+Unexpected pipeline exceptions include a traceback and exit nonzero. Errors
+before the geometry directory is resolved appear only on the console; a requested
+log file that cannot be opened causes the run to fail.
+
+Library modules use `logging.getLogger(__name__)`; only entrypoints configure
+handlers via `logging_setup.py`. Voxelization workers do not write logs.
+Standalone helper scripts configure console logging only; their usage text and
+the viewer's label table remain ordinary terminal output.
+
+Run logging checks from this directory with `python -m unittest test_logging`.
 
 The last three fields are optional:
 

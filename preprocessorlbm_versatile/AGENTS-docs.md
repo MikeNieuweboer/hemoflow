@@ -7,7 +7,7 @@ Run from the repository root: `python preprocessorlbm_versatile/main.py /path/to
 ## Flow and dependencies
 
 1. `main.py` reads JSON; `geometry_dir` locates STL/VTP inputs and resolves the output prefix. Required keys and units are documented in [AGENTS.md](../AGENTS.md).
-   The CLI accepts only the config path and `--debug`; JSON options `si_factor`, `cut_width`, and `distance` default to `0.001`, `1`, and `4`, respectively.
+   The CLI accepts the config path, `--debug`, and `--log-to-file`. The latter appends `<output_base_name>preprocessing.log` in `work_dir` (the geometry directory) as well as logging to stderr. `--debug` enables DEBUG in both destinations and NRRD output. Module loggers propagate to entrypoint-owned handlers in `logging_setup.py`; workers do not log. In current `main.py`, `si_factor` and `cut_width` are required and `distance` is not read.
 2. `voxelizeStl.py` uses numpy-stl → `slice.py` triangle intersections → `perimeter.py` rasterization; `util.py` pads the result. Internal slice order is rearranged to `(x,y,z)` before return.
 3. `readCL.py` uses VTK to extract endpoint radii, centers, and tangents, then converts positions to voxel space. `main.py::generate_cut_list` selects bounding-box faces whose Manhattan distance from any endpoint is at most that endpoint's radius, using the original geometry coordinates rather than a fixed voxel distance. Face indices are x-min, x-max, y-min, y-max, z-min, z-max. `main.py` then calls `createFluidSolid.py` to paint walls/fluid.
 4. `detectOpenings.py` groups and paints openings using `constants.py`; `main.py` matches centers to centerline endpoints, then saves metadata and geometry separately.
@@ -22,7 +22,9 @@ Function signatures use concrete lists/tuples for geometry and opening data, exp
 | File | Responsibility |
 | --- | --- |
 | `config.template.json` | Copyable JSON configuration template containing required input/output fields and optional preprocessing settings with their defaults. |
-| `main.py` | Pipeline/JSON entrypoint. Writes `output_base_name + "ops.npz"` with opening arrays, `dx`, dimensions, and an empty `stent` array; writes `output_base_name + "gf.h5"` with gzip-compressed flattened int8 `geometryFlag`. Stent paths are parsed but no stent voxelization runs here. |
+| `main.py` | Pipeline/JSON entrypoint. `main()` configures console logging and catches unexpected exceptions; `run_preprocessing()` resolves inputs and optional file logging, then runs the pipeline. Writes `output_base_name + "openings.npz"` with opening arrays, `dx`, and dimensions; writes `output_base_name + "geometry.h5"` with gzip-compressed flattened int8 `geometryFlag`. No stent voxelization runs here. |
+| `logging_setup.py` | Standard-library logging configuration shared by entrypoints: timestamp/level/module formatting, console output and optional UTF-8 append-only file output, replacing only its own handlers on repeated setup. Imported processing modules never configure handlers. |
+| `test_logging.py` | Unittest checks for console/file verbosity, append behavior, duplicate prevention, caller-handler preservation, file/config failures, CLI flags, module diagnostics, and unchanged wall-array expectations. Run `python -m unittest test_logging`. |
 | `voxelizeStl.py` | STL loading, scale/shift, slice rendering, padding, and axis swaps. Uses 16 workers with a local `fork` context and an initializer that stores inherited geometry per worker; tasks send only slice heights, avoiding repeated mesh serialization and allowing repeated calls without resetting the global start method. |
 | `slice.py` | Triangle/plane intersections, interpolation, bounding-box-based target resolution, transforms, and axis swaps. Imports `perimeter.py` and distance/deduplication helpers from `util.py`. |
 | `perimeter.py` | Converts slice line segments to filled or shell voxel planes; line selection/intersection helpers. NumPy-based, called by the voxelizer. |

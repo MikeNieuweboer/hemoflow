@@ -11,6 +11,7 @@ import numpy as np
 
 from createFluidSolid import create_walls
 from detectOpenings import detect_openings
+from logging_setup import configure_logging
 from readCL import convert_to_voxelspace, get_openings_from_center_line
 from voxelizeStl import voxelize
 
@@ -63,6 +64,11 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument("config", type=Path, help="Path to the input JSON config file")
     parser.add_argument(
+        "--log-to-file",
+        action="store_true",
+        help="Also append logs to <output_base_name>preprocessing.log in the geometry directory",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable DEBUG logging and intermediate NRRD output",
@@ -70,15 +76,10 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    # Setup
-    args = parse_arguments()
+def run_preprocessing(args: argparse.Namespace) -> None:
+    """Run the geometry pipeline with logging configured by the entrypoint."""
     DEBUG_MODE = args.debug
 
-    logging.basicConfig(
-        level=logging.DEBUG if DEBUG_MODE else logging.INFO,
-        format="%(levelname)s: %(message)s",
-    )
     if DEBUG_MODE:
         import nrrd
 
@@ -97,14 +98,27 @@ if __name__ == "__main__":
     center_line_file = work_dir / conf_data["centerline_vtp"]
 
     output_base_name = conf_data["output_base_name"]
+    if args.log_to_file:
+        log_path = work_dir / f"{output_base_name}preprocessing.log"
+        configure_logging(debug=DEBUG_MODE, log_path=log_path)
+        logger.info("========== Preprocessing run started ==========")
+        logger.info("Log file: %s", log_path)
+
+    logger.info("Configuration: %s", conf_file.resolve())
+    logger.info("Geometry input: %s", geometry_path)
+    logger.info("Centerline input: %s", center_line_file)
 
     target_elem = int(conf_data["target_elements"])
+    logger.info("Target bounding-box elements: %s", target_elem)
 
     # Voxelizing stl
-    start_time = time.time()
+    start_time = time.perf_counter()
 
     logger.info("Voxelizing vessel geometry")
+    start = time.perf_counter()
     voxel_vol, domain_data = voxelize(geometry_path, target_elem)
+    end = time.perf_counter()
+    logger.info("Voxelization time: %s", end - start)
 
     if DEBUG_MODE:
         logger.debug("Saving voxelization result")
@@ -126,7 +140,6 @@ if __name__ == "__main__":
     DX = (1.0 / sx) * SI_FACTOR
     logger.info("dx [m]: %s", DX)
 
-    # TODO: Fix incorrect shift in centerlines due to padding and ob1.
     # Reading centerlines.
     logger.info("Extracting information on openings from centerline")
     radius_tangent_list = get_openings_from_center_line(center_line_file)
@@ -142,9 +155,9 @@ if __name__ == "__main__":
 
     # Creating walls.
     logger.info("Creating walls and opening in/outlets")
-    start = time.time()
+    start = time.perf_counter()
     vol_with_walls, _ = create_walls(voxel_vol, cut_list, cut_width)
-    end = time.time()
+    end = time.perf_counter()
     logger.info("Creating wall time: %s", end - start)
 
     if DEBUG_MODE:
@@ -163,11 +176,11 @@ if __name__ == "__main__":
 
     # Painting openings.
     logger.info("Detecting and assigning voxel openings")
-    start = time.time()
+    start = time.perf_counter()
     opening_ids, opening_centers, vol_painted = detect_openings(
         vol_with_walls,
     )
-    end = time.time()
+    end = time.perf_counter()
     logger.info("Detecting opening time: %s", end - start)
 
     if DEBUG_MODE:
@@ -221,7 +234,7 @@ if __name__ == "__main__":
         )
 
     logger.info("Saving final output")
-    logger.info("File: %s", work_dir / (output_base_name + "ops.npz"))
+    logger.info("File: %s", work_dir / (output_base_name + "openings.npz"))
 
     np.savez_compressed(
         work_dir / (output_base_name + "openings.npz"),
@@ -242,6 +255,7 @@ if __name__ == "__main__":
     logger.info("Maximum geometry flag: %s", vol_painted.max())
 
     # Create an HDF5 file to save the geometry flag seperately
+    logger.info("File: %s", work_dir / (output_base_name + "geometry.h5"))
     with h5py.File(work_dir / (output_base_name + "geometry.h5"), "w") as f:
         # Create a dataset in the file and store the array
         dset = f.create_dataset(
@@ -253,6 +267,22 @@ if __name__ == "__main__":
             compression_opts=9,
         )
 
-    end_time = time.time()
+    end_time = time.perf_counter()
     time_elapsed = round(end_time - start_time)
     logger.info("Done -> Elapsed total time: %s [s]", time_elapsed)
+
+
+def main() -> int:
+    """Configure console logging and report unexpected failures once."""
+    args = parse_arguments()
+    configure_logging(debug=args.debug)
+    try:
+        run_preprocessing(args)
+    except Exception:
+        logger.exception("Preprocessing failed")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

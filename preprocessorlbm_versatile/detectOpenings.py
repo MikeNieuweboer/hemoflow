@@ -1,3 +1,4 @@
+import logging
 import sys
 import time
 from collections.abc import Generator
@@ -7,6 +8,8 @@ from typing import Literal
 import numpy as np
 
 from constants import VoxelType
+
+logger = logging.getLogger(__name__)
 
 
 def has_neighboring_unused_voxel(
@@ -85,7 +88,7 @@ def find_inlet_outlet(
     inlet_outlet = recur_find_inlet_outlet(x, y, z, [], data, plane)
 
     if len(inlet_outlet) > 1:
-        print(" -> Found opening of size:", len(inlet_outlet))
+        logger.debug("Found opening containing %s voxels", len(inlet_outlet))
         return inlet_outlet
 
     return None
@@ -165,9 +168,7 @@ def detect_inlets_outlets(
     - The inlets and outlets are cut parallel to the x, y or z plane.
     - The openings are located on the boundaries
     """
-    print("Detecting all fluid voxels surrounded by an unused voxel...")
-
-    start = time.time()
+    logger.debug("Detecting fluid voxels adjacent to unused voxels")
 
     ############################ Method 1: Connected component analysis (very fast) ############################
     # Note: Only works if all openings lying on the boundary surfces
@@ -225,11 +226,6 @@ def detect_inlets_outlets(
             inlet_outlet = find_inlet_outlet(x, y, z, data, plane)
             if inlet_outlet is not None:
                 inlets_outlets.append(inlet_outlet)
-
-    end = time.time()
-    print(f"Find opening time: {end - start} sec")
-
-    print(len(inlets_outlets))
 
     return paint_inlets_outlets(inlets_outlets, data)
 
@@ -350,6 +346,9 @@ def detect_openings(
 
 
 if __name__ == "__main__":
+    from logging_setup import configure_logging
+
+    configure_logging()
     if len(sys.argv) < 3:
         print("Usage:", sys.argv[0], "input.nrrd output.nrrd")
         sys.exit(-1)
@@ -358,7 +357,7 @@ if __name__ == "__main__":
 
     import nrrd
 
-    start_time = time.time()
+    start_time = time.perf_counter()
     data, data_header = nrrd.read(sys.argv[1])
 
     # TODO: This does not match the function description.
@@ -367,6 +366,6 @@ if __name__ == "__main__":
     # Write result without the surrounding layer
     nrrd.write(sys.argv[2], result)
 
-    end_time = time.time()
+    end_time = time.perf_counter()
     time_elapsed = round((end_time - start_time) * 1000)
-    print("Elapsed time:", time_elapsed, "[ms]")
+    logger.info("Elapsed time: %s ms", time_elapsed)

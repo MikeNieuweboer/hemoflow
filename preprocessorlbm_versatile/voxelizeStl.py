@@ -1,3 +1,4 @@
+import logging
 import multiprocessing
 import time
 from collections.abc import Generator
@@ -15,6 +16,8 @@ from slice import (
     to_intersecting_lines,
 )
 from util import remove_dups_from_point_list
+
+logger = logging.getLogger(__name__)
 
 _worker_mesh: list[Triangle] | None = None
 _worker_domain: list[int] | None = None
@@ -123,8 +126,6 @@ def voxelize(
         mesh = list(swap_axis(mesh, 1, 2))
         domain = [domain[0], domain[2], domain[1]]
 
-    start = time.time()
-
     # Parallel
     ctx = multiprocessing.get_context("fork")
     with ctx.Pool(
@@ -140,9 +141,6 @@ def voxelize(
             ),
             dtype=np.int8,
         )
-
-    end = time.time()
-    print(f"Voxelization time: {end - start}")
 
     # If it is a shell mesh, rotate back here the different projections!
     if rotation == 0:
@@ -206,6 +204,9 @@ def get_stl_faces(
 
 if __name__ == "__main__":
     import sys
+    from logging_setup import configure_logging
+
+    configure_logging()
 
     if len(sys.argv) < 4:
         print("Usage:", sys.argv[0], "input.nrrd output.nrrd targetElementNum")
