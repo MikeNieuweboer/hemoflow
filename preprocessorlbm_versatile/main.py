@@ -105,7 +105,6 @@ if __name__ == "__main__":
 
     logger.info("Voxelizing vessel geometry")
     voxel_vol, domain_data = voxelize(geometry_path, target_elem)
-    print(type(voxel_vol))
 
     if DEBUG_MODE:
         logger.debug("Saving voxelization result")
@@ -215,7 +214,7 @@ if __name__ == "__main__":
                 opening_tangents.append(np.array(cl_tangent))
 
     if len(opening_ids) != len(opening_centers):
-        logger.debug(
+        logger.warning(
             "Number of matched openings is incorrect: %s instead of %s",
             len(opening_ids),
             len(opening_centers),
@@ -225,7 +224,7 @@ if __name__ == "__main__":
     logger.info("File: %s", work_dir / (output_base_name + "ops.npz"))
 
     np.savez_compressed(
-        work_dir / (output_base_name + "ops.npz"),
+        work_dir / (output_base_name + "openings.npz"),
         dx=np.array([DX]).astype(np.double, copy=False),
         openingIndex=np.array(opening_ids).astype(np.int8, copy=False),
         openingRadius=np.array(opening_radius).astype(np.double, copy=False),
@@ -243,7 +242,7 @@ if __name__ == "__main__":
     logger.info("Maximum geometry flag: %s", vol_painted.max())
 
     # Create an HDF5 file to save the geometry flag seperately
-    with h5py.File(output_base_name + "gf.h5", "w") as f:
+    with h5py.File(work_dir / (output_base_name + "geometry.h5"), "w") as f:
         # Create a dataset in the file and store the array
         dset = f.create_dataset(
             "geometryFlag",

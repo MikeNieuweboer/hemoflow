@@ -18,20 +18,28 @@ def lines_to_voxels(
     Coordinates are truncated with ``int()``, and existing True pixels are
     never cleared. Only the first two coordinates of each endpoint are used.
     """
-    for x in range(len(pixels)):
+    x_shape, y_shape = pixels.shape
+    for x in range(x_shape):
         is_black = False
         # Get all lines which could have this x coordinate.
-        lines = list(find_relevant_lines(line_list, x))
+        lines = find_relevant_lines(line_list, x)
         # Get y of each boundary point.
         target_ys = [int(generate_y(line, x)) for line in lines]
-        for y in range(len(pixels[x])):
-            if is_black and (not is_shell):
-                pixels[x][y] = True
-            if y in target_ys:
-                for line in lines:
-                    if on_line(line, x, y):
-                        is_black = not is_black
-                        pixels[x][y] = True
+        target_ys.sort()
+        prev_y = 0
+        for y in target_ys:
+            if y >= y_shape:
+                break
+            if is_black and (not is_shell) and y > prev_y:
+                pixels[x][prev_y + 1 : y] = True
+
+            is_black = not is_black
+            if y < 0:
+                continue
+            pixels[x][y] = True
+            prev_y = y
+        if is_black and (not is_shell):
+            pixels[x][prev_y + 1 : y_shape] = True
 
 
 def find_relevant_lines(
@@ -91,14 +99,9 @@ def on_line(
     newy = generate_y(line, x)
     if int(newy) != y:
         return False
-    if (
-        int(line[0][0]) != x
-        and int(line[1][0]) != x
-        and (max(line[0][0], line[1][0]) < x or min(line[0][0], line[1][0]) > x)
-    ):
-        return False
-    return not (
-        int(line[0][1]) != y
-        and int(line[1][1]) != y
-        and (max(line[0][1], line[1][1]) < y or min(line[0][1], line[1][1]) > y)
+    return (
+        int(max(line[0][0], line[1][0])) >= x
+        and int(min(line[0][0], line[1][0])) <= x
+        and int(max(line[0][1], line[1][1])) >= y
+        and int(min(line[0][1], line[1][1])) <= y
     )

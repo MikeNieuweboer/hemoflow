@@ -45,10 +45,10 @@ def is_above_and_below(
     :param height:
     :return: true if any line from the triangle crosses or is on the height line,
     """
-    above = list(filter(lambda pt: pt[2] > height, point_list))
-    below = list(filter(lambda pt: pt[2] < height, point_list))
-    same = list(filter(lambda pt: pt[2] == height, point_list))
-    return bool(len(same) == 3 or len(same) == 2 or (above and below))
+    above = len(list(filter(lambda pt: pt[2] > height, point_list)))
+    below = len(list(filter(lambda pt: pt[2] < height, point_list)))
+    same = 3 - below - above
+    return bool(same >= 2 or (above and below))
 
 
 def is_intersecting_triangle(

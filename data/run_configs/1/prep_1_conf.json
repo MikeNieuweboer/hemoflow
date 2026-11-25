@@ -2,8 +2,8 @@
   "geometry_dir": "data/patients/1/",
   "geometry_original_stl": "fontan_mesh_open_clipped.stl",
   "centerline_vtp": "extended_centerlines.vtp",
-  "output_base_name": "patient1_1_",
-  "target_elements": 10000000,
+  "output_base_name": "patient1_1_prep_",
+  "target_elements": 50000000,
   "si_factor": 0.001,
   "cut_width": 1
 }

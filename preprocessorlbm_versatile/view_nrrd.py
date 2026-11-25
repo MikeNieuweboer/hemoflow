@@ -1,4 +1,5 @@
 """Interactive, label-colored 3D viewer for main.py's debug NRRD files."""
+import array
 
 import argparse
 from functools import partial
@@ -26,6 +27,70 @@ COLORS = {
     VoxelType.OUTLET_SIDE_P: "#dc267f",
 }
 
+
+def _rectangles(labels: np.ndarray, exposed: np.ndarray):
+    """Merge equal-label row runs into rectangles, using only plane-sized state."""
+    active = {}
+    for row in range(labels.shape[0]):
+        values = labels[row]
+        visible = exposed[row]
+        changes = (values[1:] != values[:-1]) | (visible[1:] != visible[:-1])
+        bounds = np.concatenate(([0], np.flatnonzero(changes) + 1, [len(values)]))
+        current = {}
+        for start, end in zip(bounds[:-1], bounds[1:]):
+            if not visible[start]:
+                continue
+            key = (int(values[start]), int(start), int(end))
+            current[key] = active.pop(key, row)
+        for (label, start, end), first_row in active.items():
+            yield label, first_row, row, start, end
+        active = current
+    for (label, start, end), first_row in active.items():
+        yield label, first_row, labels.shape[0], start, end
+
+
+def build_surface_arrays(volume: np.ndarray) -> dict:
+    """Return label -> (points, VTK quad connectivity) for a nonempty 3D array.
+
+    Each label owns its side of interfaces, so hiding one label never removes
+    another label's boundary. Coplanar faces are greedily merged, never smoothed.
+    Temporary masks span a single plane, not the complete volume. Compact
+    append-only buffers avoid Python objects per vertex and a final mesh copy.
+    """
+    if volume.ndim != 3 or volume.size == 0:
+        raise ValueError("Expected a nonempty 3D label volume")
+    buffers = {}
+    for axis in range(3):
+        u, v = (axis + 1) % 3, (axis + 2) % 3
+        planes = np.moveaxis(volume, (axis, u, v), (0, 1, 2))
+        for index in range(len(planes)):
+            labels = planes[index]
+            for direction in (-1, 1):
+                neighbor = index + direction
+                if 0 <= neighbor < len(planes):
+                    exposed = labels != planes[neighbor]
+                else:
+                    exposed = np.ones(labels.shape, dtype=bool)
+                for label, u0, u1, v0, v1 in _rectangles(labels, exposed):
+                    if label not in buffers:
+                        buffers[label] = (array.array("d"), array.array("q"))
+                    points, faces = buffers[label]
+                    first = len(points) // 3
+                    corners = ((u0, v0), (u1, v0), (u1, v1), (u0, v1))
+                    for a, b in corners:
+                        point = [0.0, 0.0, 0.0]
+                        point[axis] = index + direction * 0.5
+                        point[u], point[v] = a - 0.5, b - 0.5
+                        points.extend(point)
+                    order = (0, 1, 2, 3) if direction > 0 else (0, 3, 2, 1)
+                    faces.extend((4, *(first + corner for corner in order)))
+    return {
+        label: (
+            np.frombuffer(points, dtype=np.float64).reshape(-1, 3),
+            np.frombuffer(faces, dtype=np.int64),
+        )
+        for label, (points, faces) in buffers.items()
+    }
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -73,6 +138,8 @@ def show_volume(args: argparse.Namespace) -> None:
     labels, counts = np.unique(volume, return_counts=True)
     if not np.all(np.isfinite(labels)) or not np.all(labels == np.floor(labels)):
         raise ValueError("Voxel labels must be finite integers")
+    surfaces = build_surface_arrays(volume)
+    del volume
 
     names = {int(member): member.name for member in VoxelType}
     plotter = pv.Plotter(
@@ -94,19 +161,9 @@ def show_volume(args: argparse.Namespace) -> None:
         color = COLORS.get(label, "#ffffff")
         print(f"{label:3d}  {name:20s} {int(count):12,d} voxels")
 
-        # Treat labels as whole cells, not point samples for interpolation.
-        # Cell centers remain at integer voxel indices; faces lie at +/- 0.5.
-        grid = pv.ImageData(
-            dimensions=tuple(size + 1 for size in volume.shape),
-            origin=(-0.5, -0.5, -0.5),
-        )
-        grid.cell_data["label"] = (volume == value).ravel(order="F").astype(np.uint8)
-        cells = grid.threshold(0.5, scalars="label", preference="cell")
-        # Remove shared internal faces, keeping only exact axis-aligned quads.
-        surface = cells.extract_surface()
-        del grid, cells
-        if surface.n_points == 0:
-            continue
+        # Faces lie at half-integer coordinates. No interior cells are meshed.
+        points, faces = surfaces.pop(label)
+        surface = pv.PolyData(points, faces, deep=False)
         opacity = 0.2 if label == VoxelType.WALL_VOXEL else 1.0
         actor = plotter.add_mesh(
             surface,
