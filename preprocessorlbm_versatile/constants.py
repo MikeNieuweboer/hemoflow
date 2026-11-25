@@ -16,3 +16,4 @@ class VoxelType(IntEnum):
     OUTLET_LPA = 16
     OUTLET_SIDE_V = 17
     OUTLET_SIDE_P = 18
+    INVALID_VOXEL = 19

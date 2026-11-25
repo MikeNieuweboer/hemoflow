@@ -82,7 +82,7 @@ def find_inlet_outlet(
     plane: Literal["x", "y", "z"] | None,
 ) -> list[tuple[int, int, int]] | None:
     """Create a list of voxels (x, y, z) that make up the inlet/outlet for a voxel."""
-    inlet_outlet = recur_find_inlet_outlet(x, y, z, None, None, None, [], data, plane)
+    inlet_outlet = recur_find_inlet_outlet(x, y, z, [], data, plane)
 
     if len(inlet_outlet) > 1:
         print(" -> Found opening of size:", len(inlet_outlet))
@@ -107,24 +107,22 @@ def voxel_is_not_yet_processed(
     x: int | np.integer,
     y: int | np.integer,
     z: int | np.integer,
-    inlets_outlets: list[list[tuple[int, int, int]]],
+    data: np.ndarray,
 ) -> bool:
-    return all((x, y, z) not in l for l in inlets_outlets)
+    return data[z, x, y] != VoxelType.INVALID_VOXEL
 
 
 def recur_find_inlet_outlet(
     x: int,
     y: int,
     z: int,
-    prev_x: int | None,
-    prev_y: int | None,
-    prev_z: int | None,
     result: list[tuple[int, int, int]],
     data: np.ndarray,
     plane: Literal["x", "y", "z"] | None,
 ) -> list[tuple[int, int, int]]:
     """Find the cells on a slice along a given plane which are inlet or outlet."""
     result.append((x, y, z))
+    data[z, x, y] = VoxelType.INVALID_VOXEL
 
     # Only traverse parallel to plane
     dz_list = [0] if plane == "z" else [-1, 0, 1]
@@ -138,18 +136,13 @@ def recur_find_inlet_outlet(
         y_n = y + dy
         z_n = z + dz
         if (
-            (x_n, y_n, z_n) != (prev_x, prev_y, prev_z)
-            and data[z_n][x_n][y_n] == VoxelType.FLUID_VOXEL
+            data[z_n][x_n][y_n] == VoxelType.FLUID_VOXEL
             and has_neighboring_unused_voxel(x_n, y_n, z_n, data)
-            and (x_n, y_n, z_n) not in result
         ):
             result = recur_find_inlet_outlet(
                 x_n,
                 y_n,
                 z_n,
-                x,
-                y,
-                z,
                 result,
                 data,
                 plane,
@@ -227,7 +220,7 @@ def detect_inlets_outlets(
 
     inlets_outlets = []
     for z, x, y in found_fluid_voxels:
-        if voxel_is_not_yet_processed(x, y, z, inlets_outlets):
+        if voxel_is_not_yet_processed(x, y, z, data):
             plane = get_neighbouring_unused_voxel_plane(x, y, z, data)
             inlet_outlet = find_inlet_outlet(x, y, z, data, plane)
             if inlet_outlet is not None:
